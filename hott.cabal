@@ -1,17 +1,12 @@
-cabal-version:   3.0
-name:            hott
-version:         0.0.0
-license:         BSD-3-Clause
-license-file:    LICENSE
-author:          Melanie Brown
-maintainer:      brown.m@pm.me
-category:        Language
-build-type:      Simple
-extra-doc-files: CHANGELOG.md
+cabal-version: 3.0
+name:          hott
+version:       0.0.0
+category:      Language
 
 common settings
   default-language:   GHC2021
   default-extensions:
+    NoImplicitPrelude
     BlockArguments
     DataKinds
     DefaultSignatures
@@ -19,7 +14,6 @@ common settings
     FunctionalDependencies
     LambdaCase
     MultiWayIf
-    NoImplicitPrelude
     OverloadedStrings
     PatternSynonyms
     QuasiQuotes
@@ -29,8 +23,6 @@ common settings
 
   build-depends:
     , base  >=4.17
-    , control-block
-    , list1
     , mtl
     , text  >=2.0
 
@@ -38,8 +30,7 @@ common settings
 
 library
   import:          settings
+  hs-source-dirs:  lib
   exposed-modules:
     Language.Hott
     Language.Hott.Monad
-
-  hs-source-dirs:  lib
