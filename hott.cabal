@@ -19,6 +19,7 @@ common settings
     FunctionalDependencies
     LambdaCase
     MultiWayIf
+    NoImplicitPrelude
     OverloadedStrings
     PatternSynonyms
     QuasiQuotes

@@ -1,7 +1,16 @@
 module Language.Hott where
 
 import Control.Arrow (Arrow (..))
+import Data.Bool
+import Data.Either
+import Data.Eq
+import Data.Function
+import Data.Ord
+import Data.Semigroup (Semigroup ((<>)))
 import Data.Text (Text, pack)
+import Data.Tuple
+import GHC.Enum
+import GHC.Show
 import Language.Hott.Monad
 import Numeric.Natural (Natural)
 
@@ -63,6 +72,7 @@ data TyErr
   | Unequal Point Point
   | UniverseMismatch Point Natural Point Natural
   | NotAType Point Point
+  | Malformed Point
 
 type Infer = StateT (C, Natural) (Except TyErr)
 
@@ -314,8 +324,8 @@ repoint point with name = case point of
   UA i ta tb -> UA i <$> repoint ta with name <*> repoint tb with name
 
 typeOf :: Point -> Infer Point
-typeOf = \case
-  U n -> pure (U (n + 1))
+typeOf point = case point of
+  U n -> pure (U (succ n))
   Point x -> do
     Var _ tx <- given (Name x)
     pure tx
@@ -328,7 +338,7 @@ typeOf = \case
     ta === typeOf a
     typ tb
     repoint tb a x
-  App _ _ -> throwError Crash
+  App _ _ -> throwError (Malformed point)
   Sig (Var x ta) tb -> U <$> sameUniverse (Var x ta) tb
   Pair a b -> do
     ta <- typeOf a
@@ -348,7 +358,7 @@ typeOf = \case
         g' <- repoint g a x >>= \g_ -> repoint g_ b y
         c' === typeOf g'
         pure c'
-  Proj _ _ _ _ -> throwError Crash
+  Proj _ _ _ _ -> throwError (Malformed point)
   Sum ta tb -> U <$> sameUniverse (Var (Name "") ta) tb
   InL a -> do
     ta <- typeOf a
@@ -383,7 +393,7 @@ typeOf = \case
         cs' <- repoint cs (Succ n) x
         tc' === typeOf cs'
       pure tc'
-    _ -> throwError Crash
+    _ -> throwError (Malformed m)
   Equality ta a b -> do
     ta === typeOf a
     ta === typeOf b
@@ -407,10 +417,8 @@ typeOf = \case
           >>= (\tc__ -> repoint tc__ (Refl (Point z)) p)
       withVar (Var (Name z) ta) $ tc' === typeOf c
       pure tc'
-  FunExt f g -> do
-    _
-  UA i ta tb -> do
-    _
+  FunExt _f _g -> throwError Crash
+  UA _i _ta _tb -> throwError Crash
 
 (-->) :: Point -> Point -> Infer Point
 a --> b = do
