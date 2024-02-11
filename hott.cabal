@@ -33,4 +33,3 @@ library
   hs-source-dirs:  lib
   exposed-modules:
     Language.Hott
-    Language.Hott.Monad

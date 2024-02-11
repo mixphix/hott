@@ -1,17 +1,21 @@
 module Language.Hott where
 
+import Control.Applicative
 import Control.Arrow (Arrow (..))
+import Control.Monad
+import Control.Monad.Except
+import Control.Monad.State
 import Data.Bool
 import Data.Either
 import Data.Eq
 import Data.Function
+import Data.Kind (Constraint, Type)
 import Data.Ord
 import Data.Semigroup (Semigroup ((<>)))
 import Data.Text (Text, pack)
 import Data.Tuple
 import GHC.Enum
 import GHC.Show
-import Language.Hott.Monad
 import Numeric.Natural (Natural)
 
 newtype Name = Name Text
@@ -84,6 +88,16 @@ evalInfer = (fmap fst .) . runInfer
 
 eval :: Infer x -> Either TyErr x
 eval = evalInfer (C_, 0)
+
+type MonadFresh :: (Type -> Type) -> Constraint
+class (Monad m) => MonadFresh m where
+  type Fresh m :: Type
+  fresh :: m (Fresh m)
+
+type MonadContext :: (Type -> Type) -> Constraint
+class (Monad m) => MonadContext m where
+  type Context m :: Type
+  context :: m (Context m)
 
 instance MonadFresh Infer where
   type Fresh Infer = Text
