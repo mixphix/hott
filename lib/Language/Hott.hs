@@ -2,6 +2,7 @@
 
 module Language.Hott where
 
+import Control.Arrow (Arrow (..))
 import Data.Text (Text, pack)
 import Language.Hott.Monad
 import Numeric.Natural (Natural)
@@ -12,9 +13,9 @@ newtype Name = Name Text
 data Var x = Var Name x
   deriving (Eq, Ord, Show)
 
-data Context
+data C
   = C_
-  | (:&) Context (Var Point)
+  | (:&) C (Var Point)
   deriving (Eq, Ord, Show)
 
 data Point
@@ -61,32 +62,46 @@ data TyErr
   | Unequal Point Point
   | UniverseMismatch Point Natural Natural
 
-type Infer = RWST Context () Natural (Except TyErr)
+type Infer = StateT (C, Natural) (Except TyErr)
+
 instance MonadFresh Infer where
   type Fresh Infer = Text
-  fresh = gets (pack . show)
+  fresh = modify (second succ) >> gets (pack . show . snd)
+instance MonadContext Infer where
+  type Context Infer = C
+  context = gets fst
 
--- read `Var x d0 aA <- name ∈ context` as `context |- x ::d0 aA`
-(∈) :: Name -> Context -> Infer (Var Point)
-name ∈ context0 = case context0 of
-  C_ -> throwError (NotInContext name)
-  _ :& Var x tx | x == name -> pure (Var x tx)
-  ctx :& _ -> name ∈ ctx
+inContext :: C -> Infer x -> Infer x
+inContext ctx infer = do
+  orig <- get
+  withStateT (first $ const ctx) infer <* put orig
 
-(∉) :: Name -> Context -> Infer ()
-(∉) x = \case
-  C_ -> pure ()
-  ctx :& Var y ty -> do
-    when (x == y) $ throwError (AlreadyBound x ty)
-    x ∉ ctx
+given :: Name -> Infer (Var Point)
+given name =
+  context >>= \case
+    C_ -> throwError (NotInContext name)
+    _ :& Var x tx | x == name -> pure (Var x tx)
+    ctx :& _ -> inContext ctx (given name)
 
-(+:) :: Context -> Var Point -> Infer Context
-ctx +: Var x tx = x ∉ ctx $> ctx :& Var x tx
+unbound :: Name -> Infer ()
+unbound x =
+  context >>= \case
+    C_ -> pure ()
+    ctx :& Var y ty -> do
+      when (x == y) $ throwError (AlreadyBound x ty)
+      inContext ctx (unbound x)
 
-universe :: Context -> Point -> Infer Natural
-universe ctx = \case
+withVar :: Var Point -> Infer x -> Infer x
+withVar (Var x tx) infer = do
+  unbound x
+  orig <- get
+  modify $ first (:& Var x tx)
+  infer <* put orig
+
+universe :: Point -> Infer Natural
+universe = \case
   U i -> pure i
-  t -> universe ctx =<< typeOf ctx t
+  t -> universe =<< typeOf t
 
 (===) :: Point -> Infer Point -> Infer ()
 point0 === run = do
@@ -96,18 +111,9 @@ point0 === run = do
 (<==) :: Natural -> Infer Point -> Infer ()
 ui <== run = do
   pt <- run
-  ui' <- universe C_ pt
+  ui' <- universe pt
   unless (ui <= ui') $ throwError (UniverseMismatch pt ui ui')
 
--- |
--- @'repoint' point with name@ replaces all occurrences of
--- the pattern @'Point' name@ in @point@ with @with@.
---
--- If @name@ occurs as a function argument in @point@, that argument
--- is first safely 'repoint'ed in its result before 'repoint'ing
--- the outer expression.
---
--- ctx.f. 'recoerce'
 repoint :: Point -> Point -> Text -> Infer Point
 repoint point with name = case point of
   U n -> pure (U n)
@@ -285,49 +291,47 @@ repoint point with name = case point of
   FunExt f g -> FunExt <$> repoint f with name <*> repoint g with name
   UA i ta tb -> UA i <$> repoint ta with name <*> repoint tb with name
 
-typeOf :: Context -> Point -> Infer Point
-typeOf ctx = \case
+typeOf :: Point -> Infer Point
+typeOf = \case
   U n -> pure (U (n + 1))
   Point x -> do
-    Var _ tx <- Name x ∈ ctx
+    Var _ tx <- given (Name x)
     pure tx
   Pi (Var x ta) tb -> do
-    ui <- universe ctx ta
-    ctx' <- ctx +: Var x ta
-    ui <== typeOf ctx' tb
+    ui <- universe ta
+    withVar (Var x ta) do
+      ui <== typeOf tb
     pure (U ui)
   Lam (Var x ta) b -> do
-    ctx' <- ctx +: Var x ta
-    tb <- typeOf ctx' b
+    tb <- withVar (Var x ta) do
+      typeOf b
     pure (Pi (Var x ta) tb)
   App (Pi (Var (Name x) ta) tb) a -> do
-    ta === typeOf ctx a
+    ta === typeOf a
     repoint tb a x
   App _ _ -> throwError Crash
   Sig (Var x ta) tb -> do
-    ui <- universe ctx ta
-    ctx' <- ctx +: Var x ta
-    U ui === fmap U (universe ctx' tb)
+    ui <- universe ta
+    withVar (Var x ta) $ U ui === fmap U (universe tb)
     pure (U ui)
   Pair a b -> do
-    ta <- typeOf ctx a
+    ta <- typeOf a
     x <- fresh
-    ctx' <- ctx +: Var (Name x) ta
-    tb <- typeOf ctx' =<< repoint b a x
+    tb <- withVar (Var (Name x) ta) do
+      typeOf =<< repoint b a x
     pure (Sig (Var (Name x) ta) tb)
   Proj
     (Var _ tp@(Sig (Var _ ta) tb))
     (Var (Name z) tc)
     (Var (Name x) (Var (Name y) g))
     p@(Pair a b) -> do
-      tp === typeOf ctx p
-      ctx'z <- ctx +: Var (Name z) tp
-      _ui <- universe ctx'z tc
-      ctx'ab <- ctx +: Var (Name x) ta >>= (+: Var (Name y) tb)
-      g' <- repoint g a x >>= \g_ -> repoint g_ b y
-      c' <- repoint tc p z
-      c' === typeOf ctx'ab g'
-      pure c'
+      tp === typeOf p
+      _ui <- withVar (Var (Name z) tp) $ universe tc
+      withVar (Var (Name x) ta) $ withVar (Var (Name y) tb) do
+        c' <- repoint tc p z
+        g' <- repoint g a x >>= \g_ -> repoint g_ b y
+        c' === typeOf g'
+        pure c'
   Proj _ _ _ _ -> throwError Crash
   Empty -> pure (U 0)
   Singleton -> pure (U 0)
@@ -335,30 +339,28 @@ typeOf ctx = \case
   Naturals -> pure (U 0)
   Zero -> pure Naturals
   Succ n -> do
-    Naturals === typeOf ctx n
+    Naturals === typeOf n
     pure Naturals
   IndN (Var (Name z) tc) c0 (Var (Name x) (Var (Name y) cs)) m -> case m of
     Zero -> do
-      ctx' <- ctx +: Var (Name z) Naturals
-      _ui <- universe ctx' tc
+      _ui <- withVar (Var (Name z) Naturals) $ universe tc
       tc' <- repoint tc Zero x
-      tc' === typeOf ctx c0
+      tc' === typeOf c0
       pure tc'
-    Succ n -> do
-      ctx' <- ctx +: Var (Name z) Naturals
-      _ui <- universe ctx' tc
+    Succ n -> withVar (Var (Name z) Naturals) do
+      _ui <- universe tc
       tc' <- repoint tc n x
-      ctx'' <- ctx' +: Var (Name x) Naturals >>= (+: Var (Name y) tc')
-      tcs <- repoint tc (Succ n) x
-      tcs === typeOf ctx'' cs
-      pure tc'
+      withVar (Var (Name x) Naturals) $ withVar (Var (Name y) tc') do
+        tcs <- repoint tc (Succ n) x
+        tcs === typeOf cs
+        pure tc'
     _ -> throwError Crash
   Equality ta a b -> do
-    ta === typeOf ctx a
-    ta === typeOf ctx b
-    U <$> universe ctx ta
+    ta === typeOf a
+    ta === typeOf b
+    U <$> universe ta
   Refl a -> do
-    ta <- typeOf ctx a
+    ta <- typeOf a
     pure (Equality ta a a)
   Path
     ta
@@ -367,15 +369,14 @@ typeOf ctx = \case
     a
     b
     path -> do
-      ta === typeOf ctx a
-      ta === typeOf ctx b
-      Equality ta a b === typeOf ctx path
-      ctx' <- ctx +: Var (Name z) ta
+      ta === typeOf a
+      ta === typeOf b
+      Equality ta a b === typeOf path
       tc' <-
         repoint tc (Point z) x
           >>= (\tc_ -> repoint tc_ (Point z) y)
           >>= (\tc__ -> repoint tc__ (Refl (Point z)) p)
-      tc' === typeOf ctx' c
+      withVar (Var (Name z) ta) $ tc' === typeOf c
       pure tc'
   FunExt f g -> do
     _

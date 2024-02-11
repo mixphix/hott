@@ -1,9 +1,10 @@
 module Language.Hott.Monad
   ( MonadFresh (..)
+  , MonadContext (..)
   , module Control.Applicative
   , module Control.Monad
-  , module Control.Monad.RWS
   , module Control.Monad.Except
+  , module Control.Monad.State
   , module Data.Functor
   , guardError
   )
@@ -12,10 +13,10 @@ where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Except
-import Control.Monad.RWS
-import Data.Bool
+import Control.Monad.State
+import Data.Bool (bool)
 import Data.Functor
-import Data.Kind
+import Data.Kind (Constraint, Type)
 
 type MonadFresh :: (Type -> Type) -> Constraint
 class (Monad m) => MonadFresh m where
@@ -26,3 +27,8 @@ class (Monad m) => MonadFresh m where
 
 guardError :: (MonadError e m) => e -> Bool -> m ()
 guardError e = bool (throwError e) (pure ())
+
+type MonadContext :: (Type -> Type) -> Constraint
+class MonadContext m where
+  type Context m :: Type
+  context :: m (Context m)
