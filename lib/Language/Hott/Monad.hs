@@ -22,8 +22,6 @@ type MonadFresh :: (Type -> Type) -> Constraint
 class (Monad m) => MonadFresh m where
   type Fresh m :: Type
   fresh :: m (Fresh m)
-  default fresh :: (MonadState s m, Fresh m ~ s, Enum s) => m (Fresh m)
-  fresh = get <* modify succ
 
 guardError :: (MonadError e m) => e -> Bool -> m ()
 guardError e = bool (throwError e) (pure ())
