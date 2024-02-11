@@ -1,5 +1,3 @@
-{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
-
 module Language.Hott where
 
 import Control.Arrow (Arrow (..))
