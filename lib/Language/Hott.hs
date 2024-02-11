@@ -58,7 +58,8 @@ data TyErr
   | NotInContext Name
   | AlreadyBound Name Point
   | Unequal Point Point
-  | UniverseMismatch Point Natural Natural
+  | UniverseMismatch Point Natural Point Natural
+  | NotAType Point Point
 
 type Infer = StateT (C, Natural) (Except TyErr)
 
@@ -97,20 +98,25 @@ withVar (Var x tx) infer = do
   infer <* put orig
 
 universe :: Point -> Infer Natural
-universe = \case
-  U i -> pure i
-  t -> universe =<< typeOf t
+universe point = do
+  typeOf point >>= \case
+    U i -> pure i
+    t -> throwError (NotAType point t)
+
+sameUniverse :: Var Point -> Point -> Infer Natural
+sameUniverse (Var _ p0) p1 = do
+  u0 <- universe p0
+  u1 <- universe p1
+  unless (u0 == u1) $ throwError (UniverseMismatch p0 u0 p1 u1)
+  pure u0
+
+typ :: Point -> Infer ()
+typ = void . universe
 
 (===) :: Point -> Infer Point -> Infer ()
-point0 === run = do
-  point1 <- run
-  unless (point0 == point1) $ throwError (Unequal point0 point1)
-
-(<==) :: Natural -> Infer Point -> Infer ()
-ui <== run = do
-  pt <- run
-  ui' <- universe pt
-  unless (ui <= ui') $ throwError (UniverseMismatch pt ui ui')
+p0 === run = do
+  p1 <- run
+  unless (p0 == p1) $ throwError (Unequal p0 p1)
 
 repoint :: Point -> Point -> Text -> Infer Point
 repoint point with name = case point of
@@ -295,23 +301,17 @@ typeOf = \case
   Point x -> do
     Var _ tx <- given (Name x)
     pure tx
-  Pi (Var x ta) tb -> do
-    ui <- universe ta
-    withVar (Var x ta) do
-      ui <== typeOf tb
-    pure (U ui)
+  Pi (Var x ta) tb -> U <$> sameUniverse (Var x ta) tb
   Lam (Var x ta) b -> do
-    tb <- withVar (Var x ta) do
-      typeOf b
+    typ ta
+    tb <- withVar (Var x ta) (typeOf b)
     pure (Pi (Var x ta) tb)
   App (Pi (Var (Name x) ta) tb) a -> do
     ta === typeOf a
+    typ tb
     repoint tb a x
   App _ _ -> throwError Crash
-  Sig (Var x ta) tb -> do
-    ui <- universe ta
-    withVar (Var x ta) $ U ui === fmap U (universe tb)
-    pure (U ui)
+  Sig (Var x ta) tb -> U <$> sameUniverse (Var x ta) tb
   Pair a b -> do
     ta <- typeOf a
     x <- fresh
@@ -324,7 +324,7 @@ typeOf = \case
     (Var (Name x) (Var (Name y) g))
     p@(Pair a b) -> do
       tp === typeOf p
-      _ui <- withVar (Var (Name z) tp) $ universe tc
+      withVar (Var (Name z) tp) $ typ tc
       withVar (Var (Name x) ta) $ withVar (Var (Name y) tb) do
         c' <- repoint tc p z
         g' <- repoint g a x >>= \g_ -> repoint g_ b y
@@ -341,17 +341,17 @@ typeOf = \case
     pure Naturals
   IndN (Var (Name z) tc) c0 (Var (Name x) (Var (Name y) cs)) m -> case m of
     Zero -> do
-      _ui <- withVar (Var (Name z) Naturals) $ universe tc
+      withVar (Var (Name z) Naturals) $ typ tc
       tc' <- repoint tc Zero x
       tc' === typeOf c0
       pure tc'
-    Succ n -> withVar (Var (Name z) Naturals) do
-      _ui <- universe tc
-      tc' <- repoint tc n x
+    Succ n -> do
+      withVar (Var (Name z) Naturals) $ typ tc
+      tc' <- repoint tc (Succ n) z
       withVar (Var (Name x) Naturals) $ withVar (Var (Name y) tc') do
-        tcs <- repoint tc (Succ n) x
-        tcs === typeOf cs
-        pure tc'
+        cs' <- repoint cs (Succ n) x
+        tc' === typeOf cs'
+      pure tc'
     _ -> throwError Crash
   Equality ta a b -> do
     ta === typeOf a
@@ -380,3 +380,27 @@ typeOf = \case
     _
   UA i ta tb -> do
     _
+
+(-->) :: Point -> Point -> Infer Point
+a --> b = do
+  ui <- universe a
+  ui' <- universe b
+  x <- (<>) "_" <$> fresh
+  let fun = Pi (Var (Name x) a) b
+  unless (ui == ui') $ throwError (UniverseMismatch fun ui b ui')
+  pure fun
+
+(**) :: Point -> Point -> Infer Point
+a ** b = do
+  ui <- universe a
+  ui' <- universe b
+  x <- (<>) "_" <$> fresh
+  let pair = Sig (Var (Name x) a) b
+  unless (ui == ui') $ throwError (UniverseMismatch a ui b ui')
+  pure pair
+
+negate :: Point -> Infer Point
+negate point = do
+  typ point
+  x <- fresh
+  pure (Pi (Var (Name x) point) Empty)
