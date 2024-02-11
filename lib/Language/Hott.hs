@@ -66,6 +66,15 @@ data TyErr
 
 type Infer = StateT (C, Natural) (Except TyErr)
 
+runInfer :: (C, Natural) -> Infer x -> Either TyErr (x, (C, Natural))
+runInfer = flip ((runExcept .) . runStateT)
+
+evalInfer :: (C, Natural) -> Infer x -> Either TyErr x
+evalInfer = (fmap fst .) . runInfer
+
+eval :: Infer x -> Either TyErr x
+eval = evalInfer (C_, 0)
+
 instance MonadFresh Infer where
   type Fresh Infer = Text
   fresh = modify (second succ) >> gets (pack . show . snd)
