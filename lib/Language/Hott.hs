@@ -29,6 +29,9 @@ data Point
       (Var Point)
       (Var (Var Point))
       Point
+  | Sum Point Point
+  | InL Point
+  | InR Point
   | Empty
   | Singleton
   | Single
@@ -74,6 +77,9 @@ inContext :: C -> Infer x -> Infer x
 inContext ctx infer = do
   orig <- get
   withStateT (first $ const ctx) infer <* put orig
+
+append :: Var Point -> Infer ()
+append var = modify (first (:& var))
 
 given :: Name -> Infer (Var Point)
 given name =
@@ -185,6 +191,9 @@ repoint point with name = case point of
               c' = Var (Name z) tc'
               proj' = Var (Name x) (Var (Name y) g')
           pure (Proj sig' c' proj' pair')
+  Sum ta tb -> Sum <$> repoint ta with name <*> repoint tb with name
+  InL a -> InL <$> repoint a with name
+  InR b -> InL <$> repoint b with name
   Empty -> pure Empty
   Singleton -> pure Singleton
   Single -> pure Single
@@ -331,6 +340,19 @@ typeOf = \case
         c' === typeOf g'
         pure c'
   Proj _ _ _ _ -> throwError Crash
+  Sum ta tb -> U <$> sameUniverse (Var (Name "") ta) tb
+  InL a -> do
+    ta <- typeOf a
+    ui <- typeOf ta
+    b <- fresh
+    append (Var (Name b) ui)
+    pure (Sum ta (Point b))
+  InR b -> do
+    tb <- typeOf b
+    ui <- typeOf tb
+    a <- fresh
+    append (Var (Name a) ui)
+    pure (Sum (Point a) tb)
   Empty -> pure (U 0)
   Singleton -> pure (U 0)
   Single -> pure Singleton
