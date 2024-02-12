@@ -452,6 +452,13 @@ a ** b = do
   unless (ui == ui') $ throwError (UniverseMismatch a ui b ui')
   pure pair
 
+(++) :: Point -> Point -> Infer Point
+a ++ b = do
+  ui <- universe a
+  ui' <- universe b
+  unless (ui == ui') $ throwError (UniverseMismatch a ui b ui')
+  pure (Pair a b)
+
 negate :: Point -> Infer Point
 negate point = do
   typ point
