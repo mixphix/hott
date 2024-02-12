@@ -443,7 +443,7 @@ a --> b = do
   ui' <- universe b
   x <- (<>) "_" <$> fresh
   let fun = Pi (Var (Name x) a) b
-  unless (ui == ui') $ throwError (UniverseMismatch fun ui b ui')
+  unless (ui == ui') $ throwError (UniverseMismatch a ui b ui')
   pure fun
 
 (**) :: Point -> Point -> Infer Point
