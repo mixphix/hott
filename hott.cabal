@@ -11,9 +11,11 @@ common settings
     DataKinds
     DefaultSignatures
     DerivingStrategies
+    DuplicateRecordFields
     FunctionalDependencies
     LambdaCase
     MultiWayIf
+    OverloadedRecordDot
     OverloadedStrings
     PatternSynonyms
     QuasiQuotes
@@ -24,6 +26,8 @@ common settings
   build-depends:
     , base  >=4.17
     , mtl
+    , parsec >= 3.1.17
+    , parser-combinators
     , text  >=2.0
 
   ghc-options:        -Wall -Wno-unticked-promoted-constructors
@@ -32,4 +36,5 @@ library
   import:          settings
   hs-source-dirs:  lib
   exposed-modules:
-    Language.Hott
+    Language.Hott.Source
+    Language.Hott.Syntax

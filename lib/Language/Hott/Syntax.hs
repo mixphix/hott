@@ -1,4 +1,4 @@
-module Language.Hott where
+module Language.Hott.Syntax where
 
 import Control.Applicative
 import Control.Arrow (Arrow (..))
