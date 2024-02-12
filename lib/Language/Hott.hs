@@ -76,7 +76,9 @@ data TyErr
   | Unequal Point Point
   | UniverseMismatch Point Natural Point Natural
   | NotAType Point Point
-  | Malformed Point
+  | NotAFunction Point
+  | NotAPair Point
+  | NotANatural Point
 
 type Infer = StateT (C, Natural) (Except TyErr)
 
@@ -352,7 +354,7 @@ typeOf point = case point of
     ta === typeOf a
     typ tb
     repoint tb a x
-  App _ _ -> throwError (Malformed point)
+  App f _ -> throwError (NotAFunction f)
   Sig (Var x ta) tb -> U <$> sameUniverse (Var x ta) tb
   Pair a b -> do
     ta <- typeOf a
@@ -372,7 +374,8 @@ typeOf point = case point of
         g' <- repoint g a x >>= \g_ -> repoint g_ b y
         c' === typeOf g'
         pure c'
-  Proj _ _ _ _ -> throwError (Malformed point)
+  Proj (Var _ (Sig _ _)) _ _ p -> throwError (NotAPair p)
+  Proj (Var _ tp) _ _ _ -> throwError (NotAPair tp)
   Sum ta tb -> U <$> sameUniverse (Var (Name "") ta) tb
   InL a -> do
     ta <- typeOf a
@@ -407,7 +410,7 @@ typeOf point = case point of
         cs' <- repoint cs (Succ n) x
         tc' === typeOf cs'
       pure tc'
-    _ -> throwError (Malformed m)
+    _ -> throwError (NotANatural m)
   Equality ta a b -> do
     ta === typeOf a
     ta === typeOf b
