@@ -28,11 +28,6 @@ newtype Name = Name Text
 data Var x = Var Name x
   deriving (Eq, Ord, Show)
 
-data C x
-  = C_
-  | (:&) (C x) (Var x)
-  deriving (Eq, Ord, Show)
-
 data Point
   = U Natural
   | Point Text
