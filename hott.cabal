@@ -25,6 +25,7 @@ common settings
 
   build-depends:
     , base  >=4.17
+    , containers
     , mtl
     , parsec >= 3.1.17
     , parser-combinators
