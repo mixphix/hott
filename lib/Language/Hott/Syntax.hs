@@ -44,8 +44,8 @@ newtype HottM x
           Text
           ()
           ( ExceptT
-              (Failure Hott.Point)
-              (StateT (Context Hott.Point) Identity)
+              (Failure Hott.P)
+              (StateT (Context Hott.P) Identity)
           )
           x
       )
@@ -53,22 +53,22 @@ newtype HottM x
     ( Functor
     , Applicative
     , Monad
-    , MonadError (Failure Hott.Point)
-    , MonadState (Context Hott.Point)
+    , MonadError (Failure Hott.P)
+    , MonadState (Context Hott.P)
     )
-instance HasParseErrors (Failure Hott.Point) where
+instance HasParseErrors (Failure Hott.P) where
   parseFailure = HottError . parseFailure
 
 runHottM ::
   HottM x ->
-  Context Hott.Point ->
+  Context Hott.P ->
   Text ->
-  (Either (Failure Hott.Point) x, Context Hott.Point)
+  (Either (Failure Hott.P) x, Context Hott.P)
 runHottM (HottM t) = runInterpret t
 
-instance MonadInterpret Hott.Point HottM where
-  newtype Failure Hott.Point = HottError Hott.E
-  type Label Hott.Point = Text
+instance MonadInterpret Hott.P HottM where
+  newtype Failure Hott.P = HottError Hott.E
+  type Label Hott.P = Text
   fresh = do
     Context ctx freshness <- get
     put (Context ctx $ succ freshness)
@@ -170,7 +170,7 @@ instance MonadInterpret Hott.Point HottM where
     go x = repoint x with name
     bind = (>>=)
 
-  data Context Hott.Point = Context (Map Text Hott.Point) Natural
+  data Context Hott.P = Context (Map Text Hott.P) Natural
   context = get
   acknowledge (Var name ty) = do
     Context ctx freshness <- get
@@ -273,34 +273,34 @@ instance MonadInterpret Hott.Point HottM where
     ta <- infer a
     unless (t == ta) $ failure (HottError $ Hott.Unequal t ta)
 
-given :: Label Hott.Point -> HottM (Var Hott.Point)
+given :: Label Hott.P -> HottM (Var Hott.P)
 given name =
   lookup name >>= \case
     Nothing -> failure (HottError $ Hott.NotInContext name)
     Just tx -> pure (Var name tx)
 
-typ :: Hott.Point -> HottM ()
+typ :: Hott.P -> HottM ()
 typ = void . universe
 
-universe :: Hott.Point -> HottM Natural
+universe :: Hott.P -> HottM Natural
 universe point =
   infer point >>= \case
     Hott.U i -> pure i
     t -> failure (HottError $ Hott.NotAType point t)
 
-sameUniverse :: Var Hott.Point -> Hott.Point -> HottM Natural
+sameUniverse :: Var Hott.P -> Hott.P -> HottM Natural
 sameUniverse (Var _ p0) p1 = do
   u0 <- universe p0
   u1 <- universe p1
   unless (u0 == u1) $ failure (HottError $ Hott.UniverseMismatch p0 u0 p1 u1)
   pure u0
 
-(===) :: Hott.Point -> HottM Hott.Point -> HottM ()
+(===) :: Hott.P -> HottM Hott.P -> HottM ()
 p0 === run = do
   p1 <- run
   unless (p0 == p1) $ failure (HottError $ Hott.Unequal p0 p1)
 
-(-->) :: Hott.Point -> Hott.Point -> HottM Hott.Point
+(-->) :: Hott.P -> Hott.P -> HottM Hott.P
 a --> b = do
   ui <- universe a
   ui' <- universe b
@@ -309,7 +309,7 @@ a --> b = do
   unless (ui == ui') $ failure (HottError $ Hott.UniverseMismatch a ui b ui')
   pure fun
 
-(**) :: Hott.Point -> Hott.Point -> HottM Hott.Point
+(**) :: Hott.P -> Hott.P -> HottM Hott.P
 a ** b = do
   ui <- universe a
   ui' <- universe b
@@ -318,7 +318,7 @@ a ** b = do
   unless (ui == ui') $ failure (HottError $ Hott.UniverseMismatch a ui b ui')
   pure pair
 
-negate :: Hott.Point -> HottM Hott.Point
+negate :: Hott.P -> HottM Hott.P
 negate point = do
   typ point
   x <- fresh

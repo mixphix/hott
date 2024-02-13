@@ -111,16 +111,16 @@ tk@Token.TokenParser
           ]
       }
 
-data Source l
-  = Data (Label l) l l
-  | Expression l
-  | Pattern l
+data Source p
+  = Data (Label p) p p
+  | Expression p
+  | Pattern p
 
-class (MonadInterpret l m) => MonadSource l m where
-  source :: Label l -> Source l -> m ()
+class (MonadInterpret p m) => MonadSource p m where
+  source :: Label p -> Source p -> m ()
 
-instance MonadSource Hott.Point HottM where
-  source :: Label Hott.Point -> Source Hott.Point -> HottM ()
+instance MonadSource Hott.P HottM where
+  source :: Label Hott.P -> Source Hott.P -> HottM ()
   source scope = \case
     Data a ta impl -> do
       ta === infer impl
