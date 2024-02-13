@@ -29,21 +29,15 @@ import Text.Parsec qualified as Parsec
 
 data Var x = Var Text x deriving (Eq, Ord, Show)
 
-class HasParseErrors fail where
-  parseFailure :: Parsec.ParseError -> fail
+class HasParseErrors e where
+  parseFailure :: Parsec.ParseError -> e
 
-type MonadInterpret :: Type -> (Type -> Type) -> Constraint
+type MonadInterpret :: Type -> Type -> (Type -> Type) -> Constraint
 class
-  ( Monad m
-  , MonadError (Failure p) m
-  , HasParseErrors (Failure p)
-  ) =>
-  MonadInterpret p m
+  (MonadError e m, HasParseErrors e) =>
+  MonadInterpret e p m
+    | m -> p e
   where
-  data Failure p :: Type
-  failure :: Failure p -> m x
-  failure = throwError
-
   data Context p :: Type
 
   context :: m (Context p)
@@ -62,14 +56,14 @@ class
   infer :: p -> m p
   check :: p -> p -> m ()
 
-locally :: (MonadInterpret p m) => Context p -> m x -> m x
+locally :: (MonadInterpret e p m) => Context p -> m x -> m x
 locally ctx act = do
   c0 <- context
   setContext ctx
   x <- act
   setContext c0
   pure x
-localVar :: (MonadInterpret p m) => Var p -> m x -> m x
+localVar :: (MonadInterpret e p m) => Var p -> m x -> m x
 localVar var act = do
   ctx <- context
   acknowledge var
@@ -77,14 +71,14 @@ localVar var act = do
   setContext ctx
   pure x
 
-type InterpretT :: Type -> (Type -> Type) -> Type -> Type
-type InterpretT p m x =
-  ParsecT Text () (ExceptT (Failure p) (StateT (Context p) m)) x
-type Interpret p x = InterpretT p Identity x
+type InterpretT :: Type -> Type -> (Type -> Type) -> Type -> Type
+type InterpretT e p m x =
+  ParsecT Text () (ExceptT e (StateT (Context p) m)) x
+type Interpret e p x = InterpretT e p Identity x
 
 runInterpretT ::
-  (Monad m, HasParseErrors (Failure p)) =>
-  (InterpretT p m x -> Context p -> Text -> m (Either (Failure p) x, Context p))
+  (Monad m, HasParseErrors e) =>
+  (InterpretT e p m x -> Context p -> Text -> m (Either e x, Context p))
 runInterpretT i c src =
   runStateT (runExceptT (Parsec.runParserT i () "" src)) c <&> \case
     (Left f, ctx) -> (Left f, ctx)
@@ -92,6 +86,6 @@ runInterpretT i c src =
     (Right (Right x), ctx) -> (Right x, ctx)
 
 runInterpret ::
-  (HasParseErrors (Failure p)) =>
-  (Interpret p x -> Context p -> Text -> (Either (Failure p) x, Context p))
+  (HasParseErrors e) =>
+  (Interpret e p x -> Context p -> Text -> (Either e x, Context p))
 runInterpret = ((runIdentity .) .) . runInterpretT

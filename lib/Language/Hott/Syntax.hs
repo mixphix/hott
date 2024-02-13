@@ -42,35 +42,23 @@ import Language.Hott.Structure qualified as Hott
 type HottM :: Type -> Type
 newtype HottM x
   = HottM
-      ( ParsecT
-          Text
-          ()
-          ( ExceptT
-              (Failure Hott.P)
-              (StateT (Context Hott.P) Identity)
-          )
-          x
-      )
+      (ParsecT Text () (ExceptT Hott.E (StateT (Context Hott.P) Identity)) x)
   deriving newtype
     ( Functor
     , Applicative
     , Monad
-    , MonadError (Failure Hott.P)
+    , MonadError Hott.E
     , MonadState (Context Hott.P)
     )
-instance HasParseErrors (Failure Hott.P) where
-  parseFailure = HottError . parseFailure
 
 runHottM ::
   HottM x ->
   Context Hott.P ->
   Text ->
-  (Either (Failure Hott.P) x, Context Hott.P)
+  (Either Hott.E x, Context Hott.P)
 runHottM (HottM t) = runInterpret t
 
-instance MonadInterpret Hott.P HottM where
-  newtype Failure Hott.P = HottError Hott.E deriving newtype (Eq, Show)
-
+instance MonadInterpret Hott.E Hott.P HottM where
   fresh = do
     c <- context
     setContext (C c.gamma (succ c.state))
@@ -180,7 +168,7 @@ instance MonadInterpret Hott.P HottM where
     c <- context
     case c.gamma !? name of
       Nothing -> setContext (C (Map.insert name ty c.gamma) c.state)
-      Just _ -> failure (HottError $ Hott.AlreadyBound name ty)
+      Just _ -> throwError $ Hott.AlreadyBound name ty
   lookup name = context <&> \c -> c.gamma !? name
 
   infer point = case point of
@@ -197,7 +185,7 @@ instance MonadInterpret Hott.P HottM where
       ta === infer a
       typ tb
       repoint tb a x
-    Hott.App f _ -> failure (HottError $ Hott.NotAFunction f)
+    Hott.App f _ -> throwError $ Hott.NotAFunction f
     Hott.Sig (Var x ta) tb -> Hott.U <$> sameUniverse (Var x ta) tb
     Hott.Pair a b -> do
       ta <- infer a
@@ -218,8 +206,8 @@ instance MonadInterpret Hott.P HottM where
           c' === infer g'
           pure c'
     Hott.Proj (Var _ (Hott.Sig _ _)) _ _ p ->
-      failure (HottError $ Hott.NotASigma p)
-    Hott.Proj (Var _ tp) _ _ _ -> failure (HottError $ Hott.NotAPair tp)
+      throwError $ Hott.NotASigma p
+    Hott.Proj (Var _ tp) _ _ _ -> throwError $ Hott.NotAPair tp
     Hott.Sum ta tb -> Hott.U <$> sameUniverse (Var "" ta) tb
     Hott.InL a -> do
       ta <- infer a
@@ -254,7 +242,7 @@ instance MonadInterpret Hott.P HottM where
           cs' <- repoint cs (Hott.Succ n) x
           tc' === infer cs'
         pure tc'
-      _ -> failure (HottError $ Hott.NotANatural m)
+      _ -> throwError $ Hott.NotANatural m
     Hott.Equality ta a b -> do
       ta === infer a
       ta === infer b
@@ -272,16 +260,17 @@ instance MonadInterpret Hott.P HottM where
         repoint tc2 (Hott.Refl (Hott.Point z)) p
       localVar (Var z ta) $ tc' === infer c
       pure tc'
-    Hott.FunExt _f _g -> failure (HottError Hott.Crash)
-    Hott.UA _i _ta _tb -> failure (HottError Hott.Crash)
+    Hott.FunExt _f _g -> throwError Hott.Crash
+    Hott.UA _i _ta _tb -> throwError Hott.Crash
   check a t = do
     ta <- infer a
-    unless (t == ta) $ failure (HottError $ Hott.Unequal t ta)
+    unless (t == ta) do
+      throwError $ Hott.Unequal t ta
 
 given :: Text -> HottM (Var Hott.P)
 given name =
   lookup name >>= \case
-    Nothing -> failure (HottError $ Hott.NotInContext name)
+    Nothing -> throwError $ Hott.NotInContext name
     Just tx -> pure (Var name tx)
 
 typ :: Hott.P -> HottM ()
@@ -291,19 +280,21 @@ universe :: Hott.P -> HottM Natural
 universe point =
   infer point >>= \case
     Hott.U i -> pure i
-    t -> failure (HottError $ Hott.NotAType point t)
+    t -> throwError $ Hott.NotAType point t
 
 sameUniverse :: Var Hott.P -> Hott.P -> HottM Natural
 sameUniverse (Var _ p0) p1 = do
   u0 <- universe p0
   u1 <- universe p1
-  unless (u0 == u1) $ failure (HottError $ Hott.UniverseMismatch p0 u0 p1 u1)
+  unless (u0 == u1) do
+    throwError $ Hott.UniverseMismatch p0 u0 p1 u1
   pure u0
 
 (===) :: Hott.P -> HottM Hott.P -> HottM ()
 p0 === run = do
   p1 <- run
-  unless (p0 == p1) $ failure (HottError $ Hott.Unequal p0 p1)
+  unless (p0 == p1) do
+    throwError $ Hott.Unequal p0 p1
 
 (-->) :: Hott.P -> Hott.P -> HottM Hott.P
 a --> b = do
@@ -311,7 +302,8 @@ a --> b = do
   ui' <- universe b
   x <- (<>) "_" <$> fresh
   let fun = Hott.Pi (Var x a) b
-  unless (ui == ui') $ failure (HottError $ Hott.UniverseMismatch a ui b ui')
+  unless (ui == ui') do
+    throwError $ Hott.UniverseMismatch a ui b ui'
   pure fun
 
 (**) :: Hott.P -> Hott.P -> HottM Hott.P
@@ -320,7 +312,8 @@ a ** b = do
   ui' <- universe b
   x <- (<>) "_" <$> fresh
   let pair = Hott.Sig (Var x a) b
-  unless (ui == ui') $ failure (HottError $ Hott.UniverseMismatch a ui b ui')
+  unless (ui == ui') do
+    throwError $ Hott.UniverseMismatch a ui b ui'
   pure pair
 
 negate :: Hott.P -> HottM Hott.P

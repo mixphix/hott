@@ -116,10 +116,10 @@ data Source p
   | Expression p
   | Pattern p
 
-class (MonadInterpret p m) => MonadSource p m where
+class (MonadInterpret e p m) => MonadSource e p m where
   source :: Text -> Source p -> m ()
 
-instance MonadSource Hott.P HottM where
+instance MonadSource Hott.E Hott.P HottM where
   source :: Text -> Source Hott.P -> HottM ()
   source scope = \case
     Data a ta impl -> do
