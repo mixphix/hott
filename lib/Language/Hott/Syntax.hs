@@ -28,6 +28,7 @@ import Data.Kind (Type)
 import Data.Map.Strict (Map, (!?))
 import Data.Map.Strict qualified as Map
 import Data.Maybe
+import Data.Ord
 import Data.Semigroup (Semigroup ((<>)))
 import Data.String
 import Data.Text (Text)
@@ -68,7 +69,7 @@ runHottM ::
 runHottM (HottM t) = runInterpret t
 
 instance MonadInterpret Hott.P HottM where
-  newtype Failure Hott.P = HottError Hott.E
+  newtype Failure Hott.P = HottError Hott.E deriving newtype (Eq, Show)
 
   fresh = do
     c <- context
@@ -174,6 +175,7 @@ instance MonadInterpret Hott.P HottM where
     { gamma :: Map Text Hott.P
     , state :: Natural
     }
+    deriving (Eq, Ord, Show)
   acknowledge (Var name ty) = do
     c <- context
     case c.gamma !? name of
