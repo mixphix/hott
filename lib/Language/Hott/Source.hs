@@ -40,10 +40,16 @@ import Control.Monad
 import Data.Bool
 import Data.Char
 import Data.Eq
+import Data.Kind
+import Data.Ord
+import Data.Semigroup
 import Data.Text (Text)
-import Text.Parsec (satisfy)
+import GHC.Show
+import Text.Parsec
 import Text.Parsec.Text (Parser)
 import Text.Parsec.Token qualified as Token
+
+import Language.Hott.Syntax
 
 tk :: (Monad m) => Token.GenTokenParser Text u m
 tk@Token.TokenParser
@@ -105,3 +111,35 @@ tk@Token.TokenParser
           , "∑" -- option-W
           ]
       }
+
+-- |
+-- 'Pos' has an 'Eq' instance that ignores the 'SourcePos',
+-- but an 'Ord' instance that sorts by 'SourcePos' first. Be careful!
+type Pos :: Type -> Type
+data Pos x = Pos
+  { pos :: SourcePos
+  , __ :: x
+  }
+  deriving (Show, Functor)
+
+instance (Eq x) => Eq (Pos x) where
+  x == y = x.__ == y.__
+instance (Ord x) => Ord (Pos x) where
+  compare p0 p1 = compare p0.pos p1.pos <> compare p0.__ p1.__
+
+type Data :: Type -> (Type -> Type) -> Type
+data Data l m = Data
+  { term :: m l
+  , impl :: m [m l]
+  }
+
+type Source :: Type -> (Type -> Type) -> Type
+data Source l m
+  = Scope (Pos (Var [Source l m]))
+  | Import (Pos (Var [Source l m]))
+  | Definition (Pos (Var (Data l m)))
+  | Expression (Pos (m l))
+  | Pattern (Pos (m l))
+
+class (MonadInfer l m) => MonadSource l m where
+  source :: m (Source l m)
