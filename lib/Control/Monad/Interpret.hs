@@ -47,23 +47,24 @@ class
 
   data Context p :: Type
   context :: m (Context p)
+  setContext :: Context p -> m ()
+  default setContext :: (MonadState (Context p) m) => Context p -> m ()
+  setContext = put
   lookup :: Text -> m (Maybe p)
   acknowledge :: Var p -> m ()
   locally :: Context p -> m x -> m x
-  default locally :: (MonadState (Context p) m) => Context p -> m x -> m x
   locally ctx act = do
-    c0 <- get
-    put ctx
+    c0 <- context
+    setContext ctx
     x <- act
-    put c0
+    setContext c0
     pure x
   localVar :: Var p -> m x -> m x
-  default localVar :: (MonadState (Context p) m) => Var p -> m x -> m x
   localVar var act = do
     ctx <- context
     acknowledge var
     x <- act
-    put ctx
+    setContext ctx
     pure x
 
   infer :: p -> m p
