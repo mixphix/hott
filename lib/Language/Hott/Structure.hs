@@ -37,7 +37,7 @@ import Data.Text (Text)
 import GHC.Enum
 import GHC.Show
 import Numeric.Natural (Natural)
-import Text.Parsec (ParsecT, ParseError)
+import Text.Parsec (ParseError, ParsecT)
 
 -- | Identifier
 newtype I = I Text deriving newtype (IsString, Eq, Ord, Semigroup, Show)
@@ -101,50 +101,68 @@ instance MonadInterpret I E N P M where
   fresh = do
     n <- get
     put (N n.gamma (succ n.state))
-    pure ("_" <> fromString (show n.state))
+    pure $ "_" <> fromString (show n.state)
   repoint point with name = case point of
     U u -> pure (U u)
     Point p -> pure if p == name then with else Point p
     Pi (Var x ta) tb
-      | x == name -> bind fresh \x' -> (>>= go) do
+      | x == name -> goWith \x' -> do
           pure (Pi . (Var x'))
             `ap` repoint ta (Point x') x
             `ap` repoint tb (Point x') x
-      | otherwise -> pure (Pi . Var x) `ap` go ta `ap` go tb
+      | otherwise ->
+          pure (Pi . Var x)
+            `ap` go ta
+            `ap` go tb
     Lambda (Var x ta) b
-      | x == name -> bind fresh \x' -> (>>= go) do
+      | x == name -> goWith \x' -> do
           pure (Lambda . (Var x'))
             `ap` repoint ta (Point x') x
             `ap` repoint b (Point x') x
-      | otherwise -> pure (Lambda . Var x) `ap` go ta `ap` go b
-    Apply p0 p1 -> liftM2 Apply (go p0) (go p1)
+      | otherwise ->
+          pure (Lambda . Var x)
+            `ap` go ta
+            `ap` go b
+    Apply p0 p1 ->
+      pure Apply
+        `ap` go p0
+        `ap` go p1
     Sigma (Var x ta) tb
-      | x == name -> bind fresh \x' -> (>>= go) do
+      | x == name -> goWith \x' -> do
           pure (Sigma . (Var x'))
             `ap` repoint ta (Point x') x
             `ap` repoint tb (Point x') x
-      | otherwise -> pure (Sigma . Var x) `ap` go ta `ap` go tb
-    Pair a b -> pure Pair `ap` go a `ap` go b
+      | otherwise ->
+          pure (Sigma . Var x)
+            `ap` go ta
+            `ap` go tb
+    Pair a b ->
+      pure Pair
+        `ap` go a
+        `ap` go b
     Proj sig@(Var p tp) c@(Var z tc) proj@(Var x (Var y g)) pair
-      | p == name -> bind fresh \p' -> (>>= go) do
+      | p == name -> goWith \p' -> do
           tp' <- repoint tp (Point p') p
-          pure (Proj (Var p' tp') c proj pair)
-      | z == name -> bind fresh \z' -> (>>= go) do
+          pure $ Proj (Var p' tp') c proj pair
+      | z == name -> goWith \z' -> do
           tc' <- repoint tc (Point z') z
-          pure (Proj sig (Var z' tc') proj pair)
-      | x == name -> bind fresh \x' -> (>>= go) do
+          pure $ Proj sig (Var z' tc') proj pair
+      | x == name -> goWith \x' -> do
           g' <- repoint g (Point x') x
-          pure (Proj sig c (Var x' (Var y g')) pair)
-      | y == name -> bind fresh \y' -> (>>= go) do
+          pure $ Proj sig c (Var x' (Var y g')) pair
+      | y == name -> goWith \y' -> do
           g' <- repoint g (Point y') y
-          pure (Proj sig c (Var x (Var y' g')) pair)
+          pure $ Proj sig c (Var x (Var y' g')) pair
       | otherwise ->
           pure Proj
             `ap` (Var p <$> go tp)
             `ap` (Var z <$> go tc)
             `ap` (Var x . Var y <$> go g)
             `ap` go pair
-    Sum ta tb -> pure Sum `ap` go ta `ap` go tb
+    Sum ta tb ->
+      pure Sum
+        `ap` go ta
+        `ap` go tb
     InL a -> InL <$> go a
     InR b -> InR <$> go b
     Empty -> pure Empty
@@ -154,36 +172,40 @@ instance MonadInterpret I E N P M where
     Zero -> pure Zero
     Succ m -> pure (Succ m)
     IndN (Var z tc) c0 cs@(Var x (Var y c1)) m
-      | z == name -> bind fresh \z' -> (>>= go) do
+      | z == name -> goWith \z' -> do
           tc' <- repoint tc (Point z') z
-          pure (IndN (Var z' tc') c0 cs m)
-      | x == name -> bind fresh \x' -> (>>= go) do
+          pure $ IndN (Var z' tc') c0 cs m
+      | x == name -> goWith \x' -> do
           c1' <- repoint c1 (Point x') x
-          pure (IndN (Var z tc) c0 (Var x' (Var y c1')) m)
-      | y == name -> bind fresh \y' -> (>>= go) do
+          pure $ IndN (Var z tc) c0 (Var x' (Var y c1')) m
+      | y == name -> goWith \y' -> do
           c1' <- repoint c1 (Point y') y
-          pure (IndN (Var z tc) c0 (Var x (Var y' c1')) m)
+          pure $ IndN (Var z tc) c0 (Var x (Var y' c1')) m
       | otherwise ->
           pure IndN
             `ap` (Var z <$> go tc)
             `ap` go c0
             `ap` (Var x . Var y <$> go c1)
             `ap` go m
-    Equality ta a b -> pure Equality `ap` go ta `ap` go a `ap` go b
+    Equality ta a b ->
+      pure Equality
+        `ap` go ta
+        `ap` go a
+        `ap` go b
     Refl a -> Refl <$> go a
     Path ta (Var x (Var y (Var p tc))) (Var z c) a b path
-      | x == name -> bind fresh \x' -> (>>= go) do
+      | x == name -> goWith \x' -> do
           tc' <- repoint tc (Point x') x
-          pure (Path ta (Var x' (Var y (Var p tc'))) (Var z c) a b path)
-      | y == name -> bind fresh \y' -> (>>= go) do
+          pure $ Path ta (Var x' (Var y (Var p tc'))) (Var z c) a b path
+      | y == name -> goWith \y' -> do
           tc' <- repoint tc (Point y') y
-          pure (Path ta (Var x (Var y' (Var p tc'))) (Var z c) a b path)
-      | p == name -> bind fresh \p' -> (>>= go) do
+          pure $ Path ta (Var x (Var y' (Var p tc'))) (Var z c) a b path
+      | p == name -> goWith \p' -> do
           tc' <- repoint tc (Point p') x
-          pure (Path ta (Var x (Var y (Var p' tc'))) (Var z c) a b path)
-      | z == name -> bind fresh \z' -> (>>= go) do
+          pure $ Path ta (Var x (Var y (Var p' tc'))) (Var z c) a b path
+      | z == name -> goWith \z' -> do
           c' <- repoint c (Point z') z
-          pure (Path ta (Var x (Var y (Var p tc))) (Var z' c') a b path)
+          pure $ Path ta (Var x (Var y (Var p tc))) (Var z' c') a b path
       | otherwise ->
           pure Path
             `ap` go ta
@@ -192,11 +214,20 @@ instance MonadInterpret I E N P M where
             `ap` go a
             `ap` go b
             `ap` go path
-    FunExt f g -> pure FunExt `ap` go f `ap` go g
-    UA i ta tb -> pure (UA i) `ap` go ta `ap` go tb
+    FunExt f g ->
+      pure FunExt
+        `ap` go f
+        `ap` go g
+    UA i ta tb ->
+      pure (UA i)
+        `ap` go ta
+        `ap` go tb
    where
+    go :: P -> M P
     go x = repoint x with name
-    bind = (>>=)
+
+    goWith :: (I -> M P) -> M P
+    goWith = (fresh >>=) . (go <=<)
 
   acknowledge (Var x tx) = do
     c <- get
@@ -206,7 +237,7 @@ instance MonadInterpret I E N P M where
   lookup name = get <&> \n -> n.gamma !? name
 
   infer point = case point of
-    U u -> pure (U (succ u))
+    U u -> pure $ U (succ u)
     Point x -> do
       Var _ tx <- given x
       pure tx
@@ -214,7 +245,7 @@ instance MonadInterpret I E N P M where
     Lambda (Var x ta) b -> do
       typ ta
       tb <- localVar (Var x ta) $ infer b
-      pure (Pi (Var x ta) tb)
+      pure $ Pi (Var x ta) tb
     Apply (Pi (Var x ta) tb) a -> do
       ta === infer a
       typ tb
@@ -226,7 +257,7 @@ instance MonadInterpret I E N P M where
       x <- fresh
       tb <- localVar (Var x ta) do
         infer =<< repoint b a x
-      pure (Sigma (Var x ta) tb)
+      pure $ Sigma (Var x ta) tb
     Proj
       (Var _ tp@(Sigma (Var _ ta) tb))
       (Var z tc)
@@ -248,13 +279,13 @@ instance MonadInterpret I E N P M where
       ui <- infer ta
       b <- fresh
       acknowledge (Var b ui)
-      pure (Sum ta (Point b))
+      pure $ Sum ta (Point b)
     InR b -> do
       tb <- infer b
       ui <- infer tb
       a <- fresh
       acknowledge (Var a ui)
-      pure (Sum (Point a) tb)
+      pure $ Sum (Point a) tb
     Empty -> pure (U 0)
     Singleton -> pure (U 0)
     Single -> pure Singleton
@@ -283,7 +314,7 @@ instance MonadInterpret I E N P M where
       U <$> universe ta
     Refl a -> do
       ta <- infer a
-      pure (Equality ta a a)
+      pure $ Equality ta a a
     Path ta (Var x (Var y (Var p tc))) (Var z c) a b path -> do
       ta === infer a
       ta === infer b
@@ -305,7 +336,7 @@ given :: I -> M (Var I P)
 given i =
   lookup i >>= \case
     Nothing -> throwError $ UnknownIdentifier i
-    Just tx -> pure (Var i tx)
+    Just tx -> pure $ Var i tx
 
 typ :: P -> M ()
 typ = void . universe
@@ -354,4 +385,4 @@ negate :: P -> M P
 negate point = do
   typ point
   x <- fresh
-  pure (Pi (Var x point) Empty)
+  pure $ Pi (Var x point) Empty
