@@ -84,24 +84,24 @@ instance MonadInterpret Hott.Point HottM where
       | otherwise -> pure (Hott.Sig . Var x) `ap` go ta `ap` go tb
     Hott.Pair a b -> pure Hott.Pair `ap` go a `ap` go b
     Hott.Proj sig@(Var p tp) c@(Var z tc) proj@(Var x (Var y g)) pair
-      | p == name -> bind fresh \p' -> do
+      | p == name -> bind fresh \p' -> (>>= go) do
           tp' <- repoint tp (Hott.Point p') p
-          go (Hott.Proj (Var p' tp') c proj pair)
-      | z == name -> bind fresh \z' -> do
+          pure (Hott.Proj (Var p' tp') c proj pair)
+      | z == name -> bind fresh \z' -> (>>= go) do
           tc' <- repoint tc (Hott.Point z') z
-          go (Hott.Proj sig (Var z' tc') proj pair)
-      | x == name -> bind fresh \x' -> do
+          pure (Hott.Proj sig (Var z' tc') proj pair)
+      | x == name -> bind fresh \x' -> (>>= go) do
           g' <- repoint g (Hott.Point x') x
-          go (Hott.Proj sig c (Var x' (Var y g')) pair)
-      | y == name -> bind fresh \y' -> do
+          pure (Hott.Proj sig c (Var x' (Var y g')) pair)
+      | y == name -> bind fresh \y' -> (>>= go) do
           g' <- repoint g (Hott.Point y') y
-          go (Hott.Proj sig c (Var x (Var y' g')) pair)
+          pure (Hott.Proj sig c (Var x (Var y' g')) pair)
       | otherwise ->
           pure Hott.Proj
             `ap` (Var p <$> go tp)
             `ap` (Var z <$> go tc)
             `ap` (Var x . Var y <$> go g)
-            `ap` (go pair)
+            `ap` go pair
     Hott.Sum ta tb -> pure Hott.Sum `ap` go ta `ap` go tb
     Hott.InL a -> Hott.InL <$> go a
     Hott.InR b -> Hott.InR <$> go b
@@ -112,49 +112,48 @@ instance MonadInterpret Hott.Point HottM where
     Hott.Zero -> pure Hott.Zero
     Hott.Succ n -> pure (Hott.Succ n)
     Hott.IndN (Var z tc) c0 cs@(Var x (Var y c1)) n
-      | z == name -> bind fresh \z' -> do
+      | z == name -> bind fresh \z' -> (>>= go) do
           tc' <- repoint tc (Hott.Point z') z
-          go (Hott.IndN (Var z' tc') c0 cs n)
-      | x == name -> bind fresh \x' -> do
+          pure (Hott.IndN (Var z' tc') c0 cs n)
+      | x == name -> bind fresh \x' -> (>>= go) do
           c1' <- repoint c1 (Hott.Point x') x
-          go (Hott.IndN (Var z tc) c0 (Var x' (Var y c1')) n)
-      | y == name -> bind fresh \y' -> do
+          pure (Hott.IndN (Var z tc) c0 (Var x' (Var y c1')) n)
+      | y == name -> bind fresh \y' -> (>>= go) do
           c1' <- repoint c1 (Hott.Point y') y
-          go (Hott.IndN (Var z tc) c0 (Var x (Var y' c1')) n)
+          pure (Hott.IndN (Var z tc) c0 (Var x (Var y' c1')) n)
       | otherwise ->
           pure Hott.IndN
             `ap` (Var z <$> go tc)
-            `ap` (go c0)
+            `ap` go c0
             `ap` (Var x . Var y <$> go c1)
-            `ap` (go n)
-    Hott.Equality ta a b ->
-      Hott.Equality <$> go ta <*> go a <*> go b
+            `ap` go n
+    Hott.Equality ta a b -> pure Hott.Equality `ap` go ta `ap` go a `ap` go b
     Hott.Refl a -> Hott.Refl <$> go a
     Hott.Path ta (Var x (Var y (Var p tc))) (Var z c) a b path
-      | x == name -> bind fresh \x' -> do
+      | x == name -> bind fresh \x' -> (>>= go) do
           tc' <- repoint tc (Hott.Point x') x
-          go (Hott.Path ta (Var x' (Var y (Var p tc'))) (Var z c) a b path)
-      | y == name -> bind fresh \y' -> do
+          pure (Hott.Path ta (Var x' (Var y (Var p tc'))) (Var z c) a b path)
+      | y == name -> bind fresh \y' -> (>>= go) do
           tc' <- repoint tc (Hott.Point y') y
-          go (Hott.Path ta (Var x (Var y' (Var p tc'))) (Var z c) a b path)
-      | p == name -> bind fresh \p' -> do
+          pure (Hott.Path ta (Var x (Var y' (Var p tc'))) (Var z c) a b path)
+      | p == name -> bind fresh \p' -> (>>= go) do
           tc' <- repoint tc (Hott.Point p') x
-          go (Hott.Path ta (Var x (Var y (Var p' tc'))) (Var z c) a b path)
-      | z == name -> bind fresh \z' -> do
+          pure (Hott.Path ta (Var x (Var y (Var p' tc'))) (Var z c) a b path)
+      | z == name -> bind fresh \z' -> (>>= go) do
           c' <- repoint c (Hott.Point z') z
-          go (Hott.Path ta (Var x (Var y (Var p tc))) (Var z' c') a b path)
+          pure (Hott.Path ta (Var x (Var y (Var p tc))) (Var z' c') a b path)
       | otherwise ->
           pure Hott.Path
-            `ap` (go ta)
+            `ap` go ta
             `ap` (Var x . Var y . Var p <$> go tc)
             `ap` (Var z <$> go c)
-            `ap` (go a)
-            `ap` (go b)
-            `ap` (go path)
-    Hott.FunExt f g -> Hott.FunExt <$> go f <*> go g
-    Hott.UA i ta tb -> Hott.UA i <$> go ta <*> go tb
+            `ap` go a
+            `ap` go b
+            `ap` go path
+    Hott.FunExt f g -> pure Hott.FunExt `ap` go f `ap` go g
+    Hott.UA i ta tb -> pure (Hott.UA i) `ap` go ta `ap` go tb
    where
-    go x = go x
+    go x = repoint x with name
     bind = (>>=)
 
   data Context Hott.Point = Context (Map Text Hott.Point) Natural
