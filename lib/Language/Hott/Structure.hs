@@ -220,7 +220,7 @@ instance MonadInterpret I E N P M where
       tb <- localVar (Var x ta) $ infer b
       pure $ Pi x ta tb
     Apply (Pi x ta tb) a -> do
-      check a ta 
+      check a ta
       typ tb
       repoint tb a x
     Apply f _ -> throwError $ NotAPiType f
@@ -231,12 +231,12 @@ instance MonadInterpret I E N P M where
         tb <- localVar (Var ø ta) $ infer =<< repoint b a ø
         pure $ Sigma ø ta tb
     Proj (Var _ p@(Sigma _ ta tb)) (Var z tc) (Var x (Var y g)) (Pair a b) -> do
-      check (Pair a b) p 
+      check (Pair a b) p
       localVar (Var z p) $ typ tc
       localVar (Var x ta) $ localVar (Var y tb) do
         c' <- repoint tc (Pair a b) z
         g' <- repoint g a x >>= \g_ -> repoint g_ b y
-        check g' c' 
+        check g' c'
         pure c'
     Proj (Var _ (Sigma _ _ _)) _ _ p -> throwError $ NotASigmaType p
     Proj (Var _ tp) _ _ _ -> throwError $ NotAPair tp
@@ -274,15 +274,15 @@ instance MonadInterpret I E N P M where
         pure tc'
       _ -> throwError $ NotANatural nat
     Equality ta a b -> do
-      check a ta 
-      check b ta 
+      check a ta
+      check b ta
       U <$> universe ta
     Refl a -> do
       ta <- infer a
       pure $ Equality ta a a
     Path ta (Var x (Var y (Var p tc))) (Var z c) a b path -> do
-      check a ta 
-      check b ta 
+      check a ta
+      check b ta
       check path (Equality ta a b)
       tc' <- do
         tc1 <- repoint tc (Point z) x
@@ -313,10 +313,10 @@ sameUniverse (Var _ p0) p1 = do
   pure u0
 
 (-->) :: P -> P -> M P
-ta --> tb = fresh \ø -> sameUniverse (Var ø ta) tb $> Pi ("_" <> ø) ta tb
+ta --> tb = fresh \ø -> sameUniverse (Var ø ta) tb $> Pi ø ta tb
 
 (**) :: P -> P -> M P
-ta ** tb = fresh \ø -> sameUniverse (Var ø ta) tb $> Sigma ("_" <> ø) ta tb
+ta ** tb = fresh \ø -> sameUniverse (Var ø ta) tb $> Sigma ø ta tb
 
 negate :: P -> M P
 negate tx = typ tx >> fresh \x -> pure $ Pi x tx Empty
