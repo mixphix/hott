@@ -69,11 +69,11 @@ runHottM (HottM t) = runInterpret t
 
 instance MonadInterpret Hott.P HottM where
   newtype Failure Hott.P = HottError Hott.E
+
   fresh = do
     c <- context
     setContext (C c.gamma (succ c.state))
     pure ("_" <> fromString (show c.state))
-  lookup name = context <&> \c -> c.gamma !? name
   repoint point with name = case point of
     Hott.U n -> pure (Hott.U n)
     Hott.Point p -> pure if p == name then with else Hott.Point p
@@ -179,6 +179,7 @@ instance MonadInterpret Hott.P HottM where
     case c.gamma !? name of
       Nothing -> setContext (C (Map.insert name ty c.gamma) c.state)
       Just _ -> failure (HottError $ Hott.AlreadyBound name ty)
+  lookup name = context <&> \c -> c.gamma !? name
 
   infer point = case point of
     Hott.U n -> pure (Hott.U (succ n))
