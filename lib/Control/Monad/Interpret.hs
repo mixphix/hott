@@ -15,6 +15,7 @@ import Control.Monad.State
 import Data.Either
 import Data.Eq
 import Data.Function
+import Data.Functor
 import Data.Functor.Identity
 import Data.Kind (Constraint, Type)
 import Data.Maybe
@@ -78,10 +79,10 @@ runInterpretT ::
   (Monad m, HasParseErrors (Failure p)) =>
   (InterpretT p m x -> Context p -> Text -> m (Either (Failure p) x, Context p))
 runInterpretT i c src =
-  runStateT (runExceptT (Parsec.runParserT i () "" src)) c >>= \case
-    (Left f, ctx) -> pure (Left f, ctx)
-    (Right (Left f), ctx) -> pure (Left (parseFailure f), ctx)
-    (Right (Right x), ctx) -> pure (Right x, ctx)
+  runStateT (runExceptT (Parsec.runParserT i () "" src)) c <&> \case
+    (Left f, ctx) -> (Left f, ctx)
+    (Right (Left f), ctx) -> (Left (parseFailure f), ctx)
+    (Right (Right x), ctx) -> (Right x, ctx)
 
 runInterpret ::
   (HasParseErrors (Failure p)) =>
