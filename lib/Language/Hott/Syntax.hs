@@ -8,6 +8,7 @@ import Control.Monad.Except
 import Control.Monad.Interpret
 import Control.Monad.State
 import Data.Bool
+import Data.Either
 import Data.Eq
 import Data.Function
 import Data.Functor.Identity
@@ -86,8 +87,7 @@ newtype Hott x = Hott
       ParsecT
         Text
         ()
-        ( ExceptT (Failure Hott.Point) (StateT (Context Hott.Point) Identity)
-        )
+        (ExceptT (Failure Hott.Point) (StateT (Context Hott.Point) Identity))
         x
   }
   deriving newtype
@@ -99,6 +99,13 @@ newtype Hott x = Hott
     )
 instance HasParseErrors (Failure Hott.Point) where
   parseFailure = HottError . parseFailure
+
+runHott ::
+  Hott x ->
+  Context Hott.Point ->
+  Text ->
+  (Either (Failure Hott.Point) x, Context Hott.Point)
+runHott (Hott t) = runInterpret t
 
 instance MonadInterpret Hott.Point Hott where
   newtype Failure Hott.Point = HottError E
@@ -212,18 +219,6 @@ instance MonadInterpret Hott.Point Hott where
     case ctx !? name of
       Nothing -> put $ Context (Map.insert name ty ctx) freshness
       Just _ -> failure (HottError $ AlreadyBound name ty)
-  locally c act = do
-    Context ctx freshness <- get
-    put c
-    x <- act
-    put (Context ctx freshness)
-    pure x
-  localVar var act = do
-    Context ctx freshness <- get
-    acknowledge var
-    x <- act
-    put (Context ctx freshness)
-    pure x
 
   infer point = case point of
     Hott.U n -> pure (Hott.U (succ n))

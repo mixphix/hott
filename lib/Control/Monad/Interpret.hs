@@ -48,7 +48,6 @@ class
   data Context l :: Type
   context :: m (Context l)
   lookup :: Label l -> m (Maybe l)
-
   acknowledge :: Var l -> m ()
   locally :: Context l -> m x -> m x
   default locally :: (MonadState (Context l) m) => Context l -> m x -> m x
@@ -78,13 +77,11 @@ type Interpret l x = InterpretT l Identity x
 runInterpretT ::
   (Monad m, HasParseErrors (Failure l)) =>
   (InterpretT l m x -> Context l -> Text -> m (Either (Failure l) x, Context l))
-runInterpretT i c src = do
-  let exceptT = Parsec.runParserT i () "" src
-      stateT = runExceptT exceptT
-   in runStateT stateT c >>= \case
-        (Left f, ctx) -> pure (Left f, ctx)
-        (Right (Left f), ctx) -> pure (Left (parseFailure f), ctx)
-        (Right (Right x), ctx) -> pure (Right x, ctx)
+runInterpretT i c src =
+  runStateT (runExceptT (Parsec.runParserT i () "" src)) c >>= \case
+    (Left f, ctx) -> pure (Left f, ctx)
+    (Right (Left f), ctx) -> pure (Left (parseFailure f), ctx)
+    (Right (Right x), ctx) -> pure (Right x, ctx)
 
 runInterpret ::
   (HasParseErrors (Failure l)) =>
