@@ -2,7 +2,7 @@
 {-# OPTIONS_GHC -Wno-missing-signatures #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
-module Language.Hott.Source
+module Language.Hott.Src
   ( Parser
   , identifier
   , reserved
@@ -41,9 +41,12 @@ import Data.Bool
 import Data.Char
 import Data.Eq
 import Data.Kind
+import Data.List.NonEmpty
+import Data.Maybe
 import Data.Ord
 import Data.Semigroup
 import Data.Text (Text)
+import Data.These
 import GHC.Show
 import Text.Parsec
 import Text.Parsec.Text (Parser)
@@ -127,19 +130,26 @@ instance (Eq x) => Eq (Pos x) where
 instance (Ord x) => Ord (Pos x) where
   compare p0 p1 = compare p0.pos p1.pos <> compare p0.__ p1.__
 
+type Import :: Type -> (Type -> Type) -> Type
+data Import l m = Import
+  { scope :: Name
+  , qual :: Maybe Name
+  , names :: These (NonEmpty Name) (NonEmpty Name)
+  }
+
 type Data :: Type -> (Type -> Type) -> Type
 data Data l m = Data
   { term :: m l
   , impl :: m [m l]
   }
 
-type Source :: Type -> (Type -> Type) -> Type
-data Source l m
-  = Scope (Pos (Var [Source l m]))
-  | Import (Pos (Var [Source l m]))
-  | Definition (Pos (Var (Data l m)))
-  | Expression (Pos (m l))
-  | Pattern (Pos (m l))
+type Src :: Type -> (Type -> Type) -> Type
+data Src l m
+  = SrcScope (Pos (Var [Src l m]))
+  | SrcImport (Pos (Import l m))
+  | SrcData (Pos (Var (Data l m)))
+  | SrcExpression (Pos (m l))
+  | SrcPattern (Pos (m l))
 
 class (MonadInfer l m) => MonadSource l m where
-  source :: m (Source l m)
+  source :: Src l m -> m ()
