@@ -42,5 +42,6 @@ data E
   | NotAPair P
   | NotANatural P
   | Misparse Parsec.ParseError
+  deriving (Eq, Show)
 instance HasParseErrors E where
   parseFailure = Misparse
