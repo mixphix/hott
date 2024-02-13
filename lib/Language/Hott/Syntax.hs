@@ -27,63 +27,9 @@ import Text.Parsec (ParsecT)
 import Language.Hott.Structure (E (..))
 import Language.Hott.Structure qualified as Hott (Point (..))
 
-given :: (MonadInterpret Hott.Point m) => Label Hott.Point -> m (Var Hott.Point)
-given name =
-  lookup name >>= \case
-    Nothing -> failure (HottError $ NotInContext name)
-    Just tx -> pure (Var name tx)
-
-typ :: (MonadInterpret Hott.Point m) => Hott.Point -> m ()
-typ = void . universe
-
-universe :: (MonadInterpret Hott.Point m) => Hott.Point -> m Natural
-universe point =
-  infer point >>= \case
-    Hott.U i -> pure i
-    t -> failure (HottError $ NotAType point t)
-
-sameUniverse ::
-  (MonadInterpret Hott.Point m) => Var Hott.Point -> Hott.Point -> m Natural
-sameUniverse (Var _ p0) p1 = do
-  u0 <- universe p0
-  u1 <- universe p1
-  unless (u0 == u1) $ failure (HottError $ UniverseMismatch p0 u0 p1 u1)
-  pure u0
-
-(===) :: (MonadInterpret Hott.Point m) => Hott.Point -> m Hott.Point -> m ()
-p0 === run = do
-  p1 <- run
-  unless (p0 == p1) $ failure (HottError $ Unequal p0 p1)
-
-(-->) ::
-  (MonadInterpret Hott.Point m) => Hott.Point -> Hott.Point -> m Hott.Point
-a --> b = do
-  ui <- universe a
-  ui' <- universe b
-  x <- (<>) "_" <$> fresh
-  let fun = Hott.Pi (Var x a) b
-  unless (ui == ui') $ failure (HottError $ UniverseMismatch a ui b ui')
-  pure fun
-
-(**) ::
-  (MonadInterpret Hott.Point m) => Hott.Point -> Hott.Point -> m Hott.Point
-a ** b = do
-  ui <- universe a
-  ui' <- universe b
-  x <- (<>) "_" <$> fresh
-  let pair = Hott.Sig (Var x a) b
-  unless (ui == ui') $ failure (HottError $ UniverseMismatch a ui b ui')
-  pure pair
-
-negate :: (MonadInterpret Hott.Point m) => Hott.Point -> m Hott.Point
-negate point = do
-  typ point
-  x <- fresh
-  pure (Hott.Pi (Var x point) Hott.Empty)
-
-type Hott :: Type -> Type
-newtype Hott x = Hott
-  { unHott ::
+type HottM :: Type -> Type
+newtype HottM x = Hott
+  { unHottM ::
       ParsecT
         Text
         ()
@@ -100,14 +46,14 @@ newtype Hott x = Hott
 instance HasParseErrors (Failure Hott.Point) where
   parseFailure = HottError . parseFailure
 
-runHott ::
-  Hott x ->
+runHottM ::
+  HottM x ->
   Context Hott.Point ->
   Text ->
   (Either (Failure Hott.Point) x, Context Hott.Point)
-runHott (Hott t) = runInterpret t
+runHottM (Hott t) = runInterpret t
 
-instance MonadInterpret Hott.Point Hott where
+instance MonadInterpret Hott.Point HottM where
   newtype Failure Hott.Point = HottError E
   type Label Hott.Point = Text
   fresh = do
@@ -313,3 +259,54 @@ instance MonadInterpret Hott.Point Hott where
   check a t = do
     ta <- infer a
     unless (t == ta) $ failure (HottError $ Unequal t ta)
+
+given :: Label Hott.Point -> HottM (Var Hott.Point)
+given name =
+  lookup name >>= \case
+    Nothing -> failure (HottError $ NotInContext name)
+    Just tx -> pure (Var name tx)
+
+typ :: Hott.Point -> HottM ()
+typ = void . universe
+
+universe :: Hott.Point -> HottM Natural
+universe point =
+  infer point >>= \case
+    Hott.U i -> pure i
+    t -> failure (HottError $ NotAType point t)
+
+sameUniverse :: Var Hott.Point -> Hott.Point -> HottM Natural
+sameUniverse (Var _ p0) p1 = do
+  u0 <- universe p0
+  u1 <- universe p1
+  unless (u0 == u1) $ failure (HottError $ UniverseMismatch p0 u0 p1 u1)
+  pure u0
+
+(===) :: Hott.Point -> HottM Hott.Point -> HottM ()
+p0 === run = do
+  p1 <- run
+  unless (p0 == p1) $ failure (HottError $ Unequal p0 p1)
+
+(-->) :: Hott.Point -> Hott.Point -> HottM Hott.Point
+a --> b = do
+  ui <- universe a
+  ui' <- universe b
+  x <- (<>) "_" <$> fresh
+  let fun = Hott.Pi (Var x a) b
+  unless (ui == ui') $ failure (HottError $ UniverseMismatch a ui b ui')
+  pure fun
+
+(**) :: Hott.Point -> Hott.Point -> HottM Hott.Point
+a ** b = do
+  ui <- universe a
+  ui' <- universe b
+  x <- (<>) "_" <$> fresh
+  let pair = Hott.Sig (Var x a) b
+  unless (ui == ui') $ failure (HottError $ UniverseMismatch a ui b ui')
+  pure pair
+
+negate :: Hott.Point -> HottM Hott.Point
+negate point = do
+  typ point
+  x <- fresh
+  pure (Hott.Pi (Var x point) Hott.Empty)

@@ -1,4 +1,3 @@
-{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# OPTIONS_GHC -Wno-missing-signatures #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
@@ -120,8 +119,8 @@ data Source l
 class (MonadInterpret l m) => MonadSource l m where
   source :: Label l -> Source l -> m ()
 
-instance (MonadInterpret Hott.Point m) => MonadSource Hott.Point m where
-  source :: Label Hott.Point -> Source Hott.Point -> m ()
+instance MonadSource Hott.Point HottM where
+  source :: Label Hott.Point -> Source Hott.Point -> HottM ()
   source scope = \case
     Data a ta impl -> do
       ta === infer impl
