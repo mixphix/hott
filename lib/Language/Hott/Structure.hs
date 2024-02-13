@@ -214,7 +214,7 @@ instance MonadInterpret I E N P M where
   infer point = case point of
     U u -> pure $ U (succ u)
     Point i -> maybe (throwError $ UnknownIdentifier i) pure =<< lookup i
-    Pi x ta tb -> U <$> sameUniverse (Var x ta) tb
+    Pi _ ta tb -> U <$> sameUniverse ta tb
     Lambda x ta b -> do
       typ ta
       tb <- localVar (Var x ta) $ infer b
@@ -224,7 +224,7 @@ instance MonadInterpret I E N P M where
       typ tb
       repoint tb a x
     Apply f _ -> throwError $ NotAPiType f
-    Sigma x ta tb -> U <$> sameUniverse (Var x ta) tb
+    Sigma _ ta tb -> U <$> sameUniverse ta tb
     Pair a b -> do
       ta <- infer a
       fresh \ø -> do
@@ -240,7 +240,7 @@ instance MonadInterpret I E N P M where
         pure c'
     Proj (Var _ (Sigma _ _ _)) _ _ p -> throwError $ NotASigmaType p
     Proj (Var _ tp) _ _ _ -> throwError $ NotAPair tp
-    Sum ta tb -> U <$> sameUniverse (Var "" ta) tb
+    Sum ta tb -> U <$> sameUniverse ta tb
     InL a -> do
       ta <- infer a
       ui <- infer ta
@@ -305,18 +305,18 @@ universe point =
     U u -> pure u
     t -> throwError $ NotAType point t
 
-sameUniverse :: Var I P -> P -> M Natural
-sameUniverse (Var _ p0) p1 = do
+sameUniverse :: P -> P -> M Natural
+sameUniverse p0 p1 = do
   u0 <- universe p0
   u1 <- universe p1
   unless (u0 == u1) (throwError $ UniverseMismatch p0 u0 p1 u1)
   pure u0
 
 (-->) :: P -> P -> M P
-ta --> tb = fresh \ø -> sameUniverse (Var ø ta) tb $> Pi ø ta tb
+ta --> tb = sameUniverse ta tb >> fresh \ø -> pure (Pi ø ta tb)
 
 (**) :: P -> P -> M P
-ta ** tb = fresh \ø -> sameUniverse (Var ø ta) tb $> Sigma ø ta tb
+ta ** tb = sameUniverse ta tb >> fresh \ø -> pure (Sigma ø ta tb)
 
 negate :: P -> M P
 negate tx = typ tx >> fresh \x -> pure $ Pi x tx Empty
