@@ -47,8 +47,8 @@ import Text.Parsec
 import Text.Parsec.Text (Parser)
 import Text.Parsec.Token qualified as Token
 
+import Language.Hott.Structure ((===))
 import Language.Hott.Structure qualified as Hott
-import Language.Hott.Syntax
 
 tk :: (Monad m) => Token.GenTokenParser Text u m
 tk@Token.TokenParser
@@ -116,11 +116,11 @@ data Source p
   | Expression p
   | Pattern p
 
-class (MonadInterpret e p m) => MonadSource e p m where
+class (MonadInterpret e n p m) => MonadSource e n p m where
   source :: Text -> Source p -> m ()
 
-instance MonadSource Hott.E Hott.P HottM where
-  source :: Text -> Source Hott.P -> HottM ()
+instance MonadSource Hott.E Hott.N Hott.P Hott.M where
+  source :: Text -> Source Hott.P -> Hott.M ()
   source scope = \case
     Data a ta impl -> do
       ta === infer impl

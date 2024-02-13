@@ -40,4 +40,3 @@ library
 
     Language.Hott.Source
     Language.Hott.Structure
-    Language.Hott.Syntax

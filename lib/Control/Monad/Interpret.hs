@@ -7,7 +7,7 @@ module Control.Monad.Interpret
   , runInterpretT
   , Interpret
   , runInterpret
-  , HasParseErrors (..)
+  , Misparse (..)
   ) where
 
 import Control.Applicative
@@ -24,27 +24,21 @@ import Data.Maybe
 import Data.Ord
 import Data.Text (Text)
 import GHC.Show
-import Text.Parsec (ParsecT)
+import Text.Parsec (ParseError, ParsecT)
 import Text.Parsec qualified as Parsec
 
 data Var x = Var Text x deriving (Eq, Ord, Show)
 
-class HasParseErrors e where
-  parseFailure :: Parsec.ParseError -> e
+class Misparse e where
+  misparse :: ParseError -> e
 
-type MonadInterpret :: Type -> Type -> (Type -> Type) -> Constraint
-class
-  (MonadError e m, HasParseErrors e) =>
-  MonadInterpret e p m
-    | m -> p e
-  where
-  data Context p :: Type
-
-  context :: m (Context p)
-  default context :: (MonadState (Context p) m) => m (Context p)
+type MonadInterpret :: Type -> Type -> Type -> (Type -> Type) -> Constraint
+class (MonadError e m, Misparse e) => MonadInterpret e n p m | m -> e n p where
+  context :: m n
+  default context :: (MonadState n m) => m n
   context = get
-  setContext :: Context p -> m ()
-  default setContext :: (MonadState (Context p) m) => Context p -> m ()
+  setContext :: n -> m ()
+  default setContext :: (MonadState n m) => n -> m ()
   setContext = put
 
   acknowledge :: Var p -> m ()
@@ -56,14 +50,14 @@ class
   infer :: p -> m p
   check :: p -> p -> m ()
 
-locally :: (MonadInterpret e p m) => Context p -> m x -> m x
+locally :: (MonadInterpret e n p m) => n -> m x -> m x
 locally ctx act = do
   c0 <- context
   setContext ctx
   x <- act
   setContext c0
   pure x
-localVar :: (MonadInterpret e p m) => Var p -> m x -> m x
+localVar :: (MonadInterpret e n p m) => Var p -> m x -> m x
 localVar var act = do
   ctx <- context
   acknowledge var
@@ -71,21 +65,19 @@ localVar var act = do
   setContext ctx
   pure x
 
-type InterpretT :: Type -> Type -> (Type -> Type) -> Type -> Type
-type InterpretT e p m x =
-  ParsecT Text () (ExceptT e (StateT (Context p) m)) x
-type Interpret e p x = InterpretT e p Identity x
+type InterpretT :: Type -> Type -> Type -> (Type -> Type) -> Type -> Type
+type InterpretT e n p m x = ParsecT Text () (ExceptT e (StateT n m)) x
+type Interpret e n p x = InterpretT e n p Identity x
 
 runInterpretT ::
-  (Monad m, HasParseErrors e) =>
-  (InterpretT e p m x -> Context p -> Text -> m (Either e x, Context p))
+  (Monad m, Misparse e) =>
+  (InterpretT e n p m x -> n -> Text -> m (Either e x, n))
 runInterpretT i c src =
   runStateT (runExceptT (Parsec.runParserT i () "" src)) c <&> \case
     (Left f, ctx) -> (Left f, ctx)
-    (Right (Left f), ctx) -> (Left (parseFailure f), ctx)
+    (Right (Left f), ctx) -> (Left (misparse f), ctx)
     (Right (Right x), ctx) -> (Right x, ctx)
 
 runInterpret ::
-  (HasParseErrors e) =>
-  (Interpret e p x -> Context p -> Text -> (Either e x, Context p))
+  (Misparse e) => Interpret e n p x -> n -> Text -> (Either e x, n)
 runInterpret = ((runIdentity .) .) . runInterpretT
