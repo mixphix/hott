@@ -221,7 +221,7 @@ instance MonadInterpret I E N P M where
       pure $ Pi x ta tb
     Apply (Pi x ta tb) a -> do
       check a ta
-      typ tb
+      localVar (Var x ta) $ typ tb
       repoint tb a x
     Apply f _ -> throwError $ NotAPiType f
     Sigma _ ta tb -> U <$> sameUniverse ta tb
