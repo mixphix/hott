@@ -1,4 +1,19 @@
-module Language.Hott.Syntax where
+module Language.Hott.Syntax
+  ( Name (..)
+  , Var (..)
+  , Point (..)
+  , InferError (..)
+  , MonadInfer (..)
+  , InferT (..)
+  , Infer
+  , InterpretT (..)
+  , Interpret
+  , runInferT
+  , runInterpretT
+  , (-->)
+  , (**)
+  , negate
+  ) where
 
 import Control.Applicative
 import Control.Monad
@@ -121,12 +136,6 @@ given name =
     Nothing -> failure (NotInContext name)
     Just tx -> pure (Var name tx)
 
-unbound :: (MonadInfer Point m) => Name -> m ()
-unbound name =
-  context >>= \ctx -> case ctx !? name of
-    Nothing -> pure ()
-    Just tx -> failure (AlreadyBound name tx)
-
 universe :: (MonadInfer Point m) => Point -> m Natural
 universe point =
   infer point >>= \case
@@ -172,15 +181,9 @@ negate point = do
   x <- fresh
   pure (Pi (Var (Name x) point) Empty)
 
-type InterpretT :: Type -> (Type -> Type) -> Type -> Type
-newtype InterpretT l m x = Interpret
-  { getInterpretT ::
-      Parsec.ParsecT
-        Text
-        ()
-        (ExceptT (InferError l) (State (Map Name l, Natural)))
-        x
-  }
+type InferT :: Type -> (Type -> Type) -> Type -> Type
+newtype InferT l m x = Infer
+  {getInferT :: ExceptT (InferError l) (State (Map Name l, Natural)) x}
   deriving
     ( Functor
     , Applicative
@@ -188,6 +191,25 @@ newtype InterpretT l m x = Interpret
     , MonadError (InferError l)
     , MonadState (Map Name l, Natural)
     )
+type Infer l = InferT l Identity
+
+runInferT ::
+  InferT l m x ->
+  (Map Name l, Natural) ->
+  (Either (InferError l) x, (Map Name l, Natural))
+runInferT (Infer i) = runState (runExceptT i)
+
+type InterpretT :: Type -> (Type -> Type) -> Type -> Type
+newtype InterpretT l m x = Interpret
+  {getInterpretT :: Parsec.ParsecT Text () (InferT l m) x}
+  deriving
+    ( Functor
+    , Applicative
+    , Monad
+    , MonadError (InferError l)
+    , MonadState (Map Name l, Natural)
+    )
+type Interpret l = InterpretT l Identity
 
 runInterpretT ::
   InterpretT l m x ->
@@ -197,12 +219,10 @@ runInterpretT ::
     (Either (InferError l) Parsec.ParseError)
     (x, (Map Name l, Natural))
 runInterpretT (Interpret p) src init =
-  case runState (runExceptT $ Parsec.runParserT p () "" src) init of
+  case runInferT (Parsec.runParserT p () "" src) init of
     (Left x, _) -> Left (Left x)
     (Right (Left x), _) -> Left (Right x)
     (Right (Right x), ctx) -> Right (x, ctx)
-
-type Interpret l = InterpretT l Identity
 
 instance (Monad m) => MonadInfer Point (InterpretT Point m) where
   type Fresh Point = Text
