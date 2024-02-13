@@ -1,6 +1,17 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module Language.Hott.Syntax where
+module Language.Hott.Syntax
+  ( HottM (HottM)
+  , runHottM
+  , given
+  , typ
+  , universe
+  , sameUniverse
+  , (===)
+  , (-->)
+  , (**)
+  , negate
+  ) where
 
 import Control.Applicative
 import Control.Monad
@@ -27,14 +38,17 @@ import Text.Parsec (ParsecT)
 import Language.Hott.Structure qualified as Hott
 
 type HottM :: Type -> Type
-newtype HottM x = Hott
-  { unHottM ::
-      ParsecT
-        Text
-        ()
-        (ExceptT (Failure Hott.Point) (StateT (Context Hott.Point) Identity))
-        x
-  }
+newtype HottM x
+  = HottM
+      ( ParsecT
+          Text
+          ()
+          ( ExceptT
+              (Failure Hott.Point)
+              (StateT (Context Hott.Point) Identity)
+          )
+          x
+      )
   deriving newtype
     ( Functor
     , Applicative
@@ -50,7 +64,7 @@ runHottM ::
   Context Hott.Point ->
   Text ->
   (Either (Failure Hott.Point) x, Context Hott.Point)
-runHottM (Hott t) = runInterpret t
+runHottM (HottM t) = runInterpret t
 
 instance MonadInterpret Hott.Point HottM where
   newtype Failure Hott.Point = HottError Hott.E
