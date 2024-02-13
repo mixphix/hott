@@ -111,24 +111,24 @@ tk@Token.TokenParser
       }
 
 data Source l
-  = Data Name l l
+  = Data Lbl l l
   | Expression l
   | Pattern l
 
 class (MonadInfer l m) => MonadSource l m where
-  source :: Name -> Source l -> m ()
+  source :: Label l -> Source l -> m ()
 
 instance (MonadInfer Point m) => MonadSource Point m where
-  source :: Name -> Source Point -> m ()
-  source (Name scope) = \case
-    Data (Name a) ta impl -> do
+  source :: Label Point -> Source Point -> m ()
+  source scope = \case
+    Data a ta impl -> do
       ta === infer impl
-      acknowledge (Var (Name (scope <> "." <> a)) ta)
+      acknowledge (Var (scope <> "." <> a) ta)
     Expression x -> do
       tx <- infer x
-      name <- fresh
-      acknowledge (Var (Name (scope <> "." <> name)) tx)
+      l <- fresh
+      acknowledge (Var (scope <> "." <> l) tx)
     Pattern p -> do
       tp <- infer p
-      name <- fresh
-      acknowledge (Var (Name (scope <> "." <> name)) tp)
+      l <- fresh
+      acknowledge (Var (scope <> "." <> l) tp)
