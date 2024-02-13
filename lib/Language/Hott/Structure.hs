@@ -81,7 +81,7 @@ data P
   | Naturals
   | Zero
   | Succ P
-  | IndN I P P (Var I (Var I P)) P
+  | Peano I P P (Var I (Var I P)) P
   | Equality P P P
   | Refl P
   | Path P (Var I (Var I (Var I P))) (Var I P) P P P
@@ -154,19 +154,19 @@ instance MonadInterpret I E N P M where
     Naturals -> pure Naturals
     Zero -> pure Zero
     Succ m -> pure (Succ m)
-    IndN z tc c0 cs@(Var x (Var y c1)) m
+    Peano z tc c0 cs@(Var x (Var y c1)) m
       | z == this -> bind fresh \ø -> do
           tc' <- repoint tc (Point ø) z
-          go $ IndN ø tc' c0 cs m
+          go $ Peano ø tc' c0 cs m
       | x == this -> bind fresh \ø -> do
           c1' <- repoint c1 (Point ø) x
-          go $ IndN z tc c0 (Var ø (Var y c1')) m
+          go $ Peano z tc c0 (Var ø (Var y c1')) m
       | y == this -> bind fresh \ø -> do
           c1' <- repoint c1 (Point ø) y
-          go $ IndN z tc c0 (Var x (Var ø c1')) m
+          go $ Peano z tc c0 (Var x (Var ø c1')) m
       | otherwise ->
           liftM4
-            (IndN z)
+            (Peano z)
             (go tc)
             (go c0)
             (Var x . Var y <$> go c1)
@@ -274,7 +274,7 @@ instance MonadInterpret I E N P M where
     Succ m -> do
       Naturals === infer m
       pure Naturals
-    IndN z tc c0 (Var x (Var y cs)) mm -> case mm of
+    Peano z tc c0 (Var x (Var y cs)) mm -> case mm of
       Zero -> do
         localVar (Var z Naturals) $ typ tc
         tc' <- repoint tc Zero x
