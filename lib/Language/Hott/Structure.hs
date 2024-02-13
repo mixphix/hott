@@ -39,6 +39,7 @@ data E
   | UniverseMismatch P Natural P Natural
   | NotAType P P
   | NotAFunction P
+  | NotASigma P
   | NotAPair P
   | NotANatural P
   | Misparse Parsec.ParseError

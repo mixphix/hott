@@ -215,7 +215,7 @@ instance MonadInterpret Hott.P HottM where
           c' === infer g'
           pure c'
     Hott.Proj (Var _ (Hott.Sig _ _)) _ _ p ->
-      failure (HottError $ Hott.NotAPair p)
+      failure (HottError $ Hott.NotASigma p)
     Hott.Proj (Var _ tp) _ _ _ -> failure (HottError $ Hott.NotAPair tp)
     Hott.Sum ta tb -> Hott.U <$> sameUniverse (Var "" ta) tb
     Hott.InL a -> do
