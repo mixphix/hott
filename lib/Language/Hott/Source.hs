@@ -1,3 +1,4 @@
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# OPTIONS_GHC -Wno-missing-signatures #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
@@ -36,17 +37,21 @@ module Language.Hott.Src
   )
 where
 
+import Control.Applicative
 import Control.Monad
 import Data.Bool
 import Data.Char
 import Data.Eq
+import Data.Foldable
 import Data.Kind
 import Data.List.NonEmpty
+import Data.Map.Strict (Map)
 import Data.Maybe
 import Data.Ord
 import Data.Semigroup
 import Data.Text (Text)
-import Data.These
+import Data.Traversable
+import Data.Wedge
 import GHC.Show
 import Text.Parsec
 import Text.Parsec.Text (Parser)
@@ -115,41 +120,24 @@ tk@Token.TokenParser
           ]
       }
 
--- |
--- 'Pos' has an 'Eq' instance that ignores the 'SourcePos',
--- but an 'Ord' instance that sorts by 'SourcePos' first. Be careful!
-type Pos :: Type -> Type
-data Pos x = Pos
-  { pos :: SourcePos
-  , __ :: x
-  }
-  deriving (Show, Functor)
-
-instance (Eq x) => Eq (Pos x) where
-  x == y = x.__ == y.__
-instance (Ord x) => Ord (Pos x) where
-  compare p0 p1 = compare p0.pos p1.pos <> compare p0.__ p1.__
-
-type Import :: Type -> (Type -> Type) -> Type
-data Import l m = Import
-  { scope :: Name
-  , qual :: Maybe Name
-  , names :: These (NonEmpty Name) (NonEmpty Name)
-  }
-
-type Data :: Type -> (Type -> Type) -> Type
-data Data l m = Data
-  { term :: m l
-  , impl :: m [m l]
-  }
-
 type Src :: Type -> (Type -> Type) -> Type
 data Src l m
-  = SrcScope (Pos (Var [Src l m]))
-  | SrcImport (Pos (Import l m))
-  | SrcData (Pos (Var (Data l m)))
-  | SrcExpression (Pos (m l))
-  | SrcPattern (Pos (m l))
+  = SrcScope Name [Src l m]
+  | SrcData Name (m l) (m [m l])
+  | SrcExpression (m l)
+  | SrcPattern (m l)
 
 class (MonadInfer l m) => MonadSource l m where
   source :: Src l m -> m ()
+
+instance (MonadInfer Point m) => MonadSource Point m where
+  source :: Src Point m -> m ()
+  source = \case
+    SrcScope scope src -> do
+      traverse_ source src
+    SrcData name point impl -> do
+      _
+    SrcExpression expr -> do
+      _
+    SrcPattern patt -> do
+      _

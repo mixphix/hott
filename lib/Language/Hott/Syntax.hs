@@ -93,6 +93,7 @@ data InferError l
   | NotAFunction l
   | NotAPair l
   | NotANatural l
+  | ParseError Parsec.ParseError
 
 type MonadInfer :: Type -> (Type -> Type) -> Constraint
 class (Monad m, MonadError (InferError l) m) => MonadInfer l m where
@@ -215,13 +216,11 @@ runInterpretT ::
   InterpretT l m x ->
   Text ->
   (Map Name l, Natural) ->
-  Either
-    (Either (InferError l) Parsec.ParseError)
-    (x, (Map Name l, Natural))
+  Either (InferError l) (x, (Map Name l, Natural))
 runInterpretT (Interpret p) src init =
   case runInferT (Parsec.runParserT p () "" src) init of
-    (Left x, _) -> Left (Left x)
-    (Right (Left x), _) -> Left (Right x)
+    (Left x, _) -> Left x
+    (Right (Left x), _) -> Left (ParseError x)
     (Right (Right x), ctx) -> Right (x, ctx)
 
 instance (Monad m) => MonadInfer Point (InterpretT Point m) where

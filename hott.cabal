@@ -29,8 +29,8 @@ common settings
     , mtl
     , parsec >= 3.1.17
     , parser-combinators
+    , smash
     , text  >=2.0
-    , these
 
   ghc-options:        -Wall -Wno-unticked-promoted-constructors
 
