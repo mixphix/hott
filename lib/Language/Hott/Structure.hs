@@ -8,7 +8,6 @@ module Language.Hott.Structure
   , typ
   , universe
   , sameUniverse
-  , (===)
   , (-->)
   , (**)
   , negate
@@ -97,44 +96,44 @@ runM :: M x -> N -> Text -> (Either E x, N)
 runM (M t) = runInterpret t
 
 instance MonadInterpret I E N P M where
-  fresh = do
+  fresh go = do
     n <- get
     put (N n.gamma (succ n.state))
-    pure $ "_" <> fromString (show n.state)
+    go $ "_" <> fromString (show n.state)
   repoint point with this = case point of
     U u -> pure (U u)
     Point p -> pure if p == this then with else Point p
     Pi x ta tb
-      | x == this -> (>>=) fresh \ø -> do
+      | x == this -> fresh \ø -> do
           ta' <- repoint ta (Point ø) x
           tb' <- repoint tb (Point ø) x
           go (Pi ø ta' tb')
       | otherwise -> liftM2 (Pi x) (go ta) (go tb)
     Lambda x ta b
-      | x == this -> (>>=) fresh \ø -> do
+      | x == this -> fresh \ø -> do
           ta' <- repoint ta (Point ø) x
           b' <- repoint b (Point ø) x
           go (Lambda ø ta' b')
       | otherwise -> liftM2 (Lambda x) (go ta) (go b)
     Apply p0 p1 -> liftM2 Apply (go p0) (go p1)
     Sigma x ta tb
-      | x == this -> (>>=) fresh \ø -> do
+      | x == this -> fresh \ø -> do
           ta' <- repoint ta (Point ø) x
           tb' <- repoint tb (Point ø) x
           go (Pi ø ta' tb')
       | otherwise -> liftM2 (Sigma x) (go ta) (go tb)
     Pair a b -> liftM2 Pair (go a) (go b)
     Proj sig@(Var p tp) c@(Var z tc) proj@(Var x (Var y g)) pair
-      | p == this -> (>>=) fresh \ø -> do
+      | p == this -> fresh \ø -> do
           to <- repoint tp (Point ø) p
           go $ Proj (Var ø to) c proj pair
-      | z == this -> (>>=) fresh \ø -> do
+      | z == this -> fresh \ø -> do
           tc' <- repoint tc (Point ø) z
           go $ Proj sig (Var ø tc') proj pair
-      | x == this -> (>>=) fresh \ø -> do
+      | x == this -> fresh \ø -> do
           g' <- repoint g (Point ø) x
           go $ Proj sig c (Var ø (Var y g')) pair
-      | y == this -> (>>=) fresh \ø -> do
+      | y == this -> fresh \ø -> do
           g' <- repoint g (Point ø) y
           go $ Proj sig c (Var x (Var ø g')) pair
       | otherwise ->
@@ -154,13 +153,13 @@ instance MonadInterpret I E N P M where
     Zero -> pure Zero
     Succ m -> pure (Succ m)
     Peano z tc c0 cs@(Var x (Var y c1)) m
-      | z == this -> (>>=) fresh \ø -> do
+      | z == this -> fresh \ø -> do
           tc' <- repoint tc (Point ø) z
           go $ Peano ø tc' c0 cs m
-      | x == this -> (>>=) fresh \ø -> do
+      | x == this -> fresh \ø -> do
           c1' <- repoint c1 (Point ø) x
           go $ Peano z tc c0 (Var ø (Var y c1')) m
-      | y == this -> (>>=) fresh \ø -> do
+      | y == this -> fresh \ø -> do
           c1' <- repoint c1 (Point ø) y
           go $ Peano z tc c0 (Var x (Var ø c1')) m
       | otherwise ->
@@ -173,16 +172,16 @@ instance MonadInterpret I E N P M where
     Equality ta a b -> liftM3 Equality (go ta) (go a) (go b)
     Refl a -> Refl <$> go a
     Path ta (Var x (Var y (Var p tc))) (Var z c) a b path
-      | x == this -> (>>=) fresh \ø -> do
+      | x == this -> fresh \ø -> do
           tc' <- repoint tc (Point ø) x
           go $ Path ta (Var ø (Var y (Var p tc'))) (Var z c) a b path
-      | y == this -> (>>=) fresh \ø -> do
+      | y == this -> fresh \ø -> do
           tc' <- repoint tc (Point ø) y
           go $ Path ta (Var x (Var ø (Var p tc'))) (Var z c) a b path
-      | p == this -> (>>=) fresh \ø -> do
+      | p == this -> fresh \ø -> do
           tc' <- repoint tc (Point ø) x
           go $ Path ta (Var x (Var y (Var ø tc'))) (Var z c) a b path
-      | z == this -> (>>=) fresh \ø -> do
+      | z == this -> fresh \ø -> do
           c' <- repoint c (Point ø) z
           go $ Path ta (Var x (Var y (Var p tc))) (Var ø c') a b path
       | otherwise ->
@@ -221,23 +220,23 @@ instance MonadInterpret I E N P M where
       tb <- localVar (Var x ta) $ infer b
       pure $ Pi x ta tb
     Apply (Pi x ta tb) a -> do
-      ta === infer a
+      check a ta 
       typ tb
       repoint tb a x
     Apply f _ -> throwError $ NotAPiType f
     Sigma x ta tb -> U <$> sameUniverse (Var x ta) tb
     Pair a b -> do
       ta <- infer a
-      x <- fresh
-      tb <- localVar (Var x ta) $ infer =<< repoint b a x
-      pure $ Sigma x ta tb
+      fresh \ø -> do
+        tb <- localVar (Var ø ta) $ infer =<< repoint b a ø
+        pure $ Sigma ø ta tb
     Proj (Var _ p@(Sigma _ ta tb)) (Var z tc) (Var x (Var y g)) (Pair a b) -> do
-      p === infer (Pair a b)
+      check (Pair a b) p 
       localVar (Var z p) $ typ tc
       localVar (Var x ta) $ localVar (Var y tb) do
         c' <- repoint tc (Pair a b) z
         g' <- repoint g a x >>= \g_ -> repoint g_ b y
-        c' === infer g'
+        check g' c' 
         pure c'
     Proj (Var _ (Sigma _ _ _)) _ _ p -> throwError $ NotASigmaType p
     Proj (Var _ tp) _ _ _ -> throwError $ NotAPair tp
@@ -245,58 +244,57 @@ instance MonadInterpret I E N P M where
     InL a -> do
       ta <- infer a
       ui <- infer ta
-      b <- fresh
-      acknowledge (Var b ui)
-      pure $ Sum ta (Point b)
+      fresh \ø -> do
+        acknowledge (Var ø ui)
+        pure $ Sum ta (Point ø)
     InR b -> do
       tb <- infer b
       ui <- infer tb
-      a <- fresh
-      acknowledge (Var a ui)
-      pure $ Sum (Point a) tb
+      fresh \ø -> do
+        acknowledge (Var ø ui)
+        pure $ Sum (Point ø) tb
     Empty -> pure (U 0)
     Singleton -> pure (U 0)
     Single -> pure Singleton
     Naturals -> pure (U 0)
     Zero -> pure Naturals
-    Succ m -> Naturals === infer m >> pure Naturals
+    Succ m -> check m Naturals >> pure Naturals
     Peano z tc c0 (Var x (Var y cs)) nat -> case nat of
       Zero -> do
         localVar (Var z Naturals) $ typ tc
         tc' <- repoint tc Zero x
-        tc' === infer c0
+        check c0 tc'
         pure tc'
       Succ m -> do
         localVar (Var z Naturals) $ typ tc
         tc' <- repoint tc (Succ m) z
         localVar (Var x Naturals) $ localVar (Var y tc') do
           cs' <- repoint cs (Succ m) x
-          tc' === infer cs'
+          check cs' tc'
         pure tc'
       _ -> throwError $ NotANatural nat
     Equality ta a b -> do
-      ta === infer a
-      ta === infer b
+      check a ta 
+      check b ta 
       U <$> universe ta
     Refl a -> do
       ta <- infer a
       pure $ Equality ta a a
     Path ta (Var x (Var y (Var p tc))) (Var z c) a b path -> do
-      ta === infer a
-      ta === infer b
-      Equality ta a b === infer path
+      check a ta 
+      check b ta 
+      check path (Equality ta a b)
       tc' <- do
         tc1 <- repoint tc (Point z) x
         tc2 <- repoint tc1 (Point z) y
         repoint tc2 (Refl (Point z)) p
-      localVar (Var z ta) $ tc' === infer c
+      localVar (Var z ta) $ check c tc'
       pure tc'
     FunExt _f _g -> throwError Crash
     UA _i _ta _tb -> throwError Crash
   check a t = do
     ta <- infer a
-    unless (t == ta) do
-      throwError $ Unequal t ta
+    unless (t == ta) (throwError $ Unequal t ta)
 
 typ :: P -> M ()
 typ = void . universe
@@ -311,36 +309,14 @@ sameUniverse :: Var I P -> P -> M Natural
 sameUniverse (Var _ p0) p1 = do
   u0 <- universe p0
   u1 <- universe p1
-  unless (u0 == u1) do
-    throwError $ UniverseMismatch p0 u0 p1 u1
+  unless (u0 == u1) (throwError $ UniverseMismatch p0 u0 p1 u1)
   pure u0
 
-(===) :: P -> M P -> M ()
-p0 === run = do
-  p1 <- run
-  unless (p0 == p1) do
-    throwError $ Unequal p0 p1
-
 (-->) :: P -> P -> M P
-ta --> tb = do
-  ui <- universe ta
-  ui' <- universe tb
-  x <- (<>) "_" <$> fresh
-  unless (ui == ui') do
-    throwError $ UniverseMismatch ta ui tb ui'
-  pure $ Pi x ta tb
+ta --> tb = fresh \ø -> sameUniverse (Var ø ta) tb $> Pi ("_" <> ø) ta tb
 
 (**) :: P -> P -> M P
-ta ** tb = do
-  ui <- universe ta
-  ui' <- universe tb
-  x <- (<>) "_" <$> fresh
-  unless (ui == ui') do
-    throwError $ UniverseMismatch ta ui tb ui'
-  pure $ Sigma x ta tb
+ta ** tb = fresh \ø -> sameUniverse (Var ø ta) tb $> Sigma ("_" <> ø) ta tb
 
 negate :: P -> M P
-negate point = do
-  typ point
-  x <- fresh
-  pure $ Pi x point Empty
+negate tx = typ tx >> fresh \x -> pure $ Pi x tx Empty

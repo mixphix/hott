@@ -46,7 +46,7 @@ class
   lookup :: i -> m (Maybe p)
   acknowledge :: Var i p -> m ()
 
-  fresh :: m i
+  fresh :: (i -> m x) -> m x
   repoint :: p -> p -> i -> m p
 
   infer :: p -> m p
