@@ -5,7 +5,6 @@ module Language.Hott.Structure
   , P (..)
   , M (..)
   , runM
-  , given
   , typ
   , universe
   , sameUniverse
@@ -106,36 +105,36 @@ instance MonadInterpret I E N P M where
     U u -> pure (U u)
     Point p -> pure if p == this then with else Point p
     Pi x ta tb
-      | x == this -> bind fresh \ø -> do
+      | x == this -> (>>=) fresh \ø -> do
           ta' <- repoint ta (Point ø) x
           tb' <- repoint tb (Point ø) x
           go (Pi ø ta' tb')
       | otherwise -> liftM2 (Pi x) (go ta) (go tb)
     Lambda x ta b
-      | x == this -> bind fresh \ø -> do
+      | x == this -> (>>=) fresh \ø -> do
           ta' <- repoint ta (Point ø) x
           b' <- repoint b (Point ø) x
           go (Lambda ø ta' b')
       | otherwise -> liftM2 (Lambda x) (go ta) (go b)
     Apply p0 p1 -> liftM2 Apply (go p0) (go p1)
     Sigma x ta tb
-      | x == this -> bind fresh \ø -> do
+      | x == this -> (>>=) fresh \ø -> do
           ta' <- repoint ta (Point ø) x
           tb' <- repoint tb (Point ø) x
           go (Pi ø ta' tb')
       | otherwise -> liftM2 (Sigma x) (go ta) (go tb)
     Pair a b -> liftM2 Pair (go a) (go b)
     Proj sig@(Var p tp) c@(Var z tc) proj@(Var x (Var y g)) pair
-      | p == this -> bind fresh \ø -> do
+      | p == this -> (>>=) fresh \ø -> do
           to <- repoint tp (Point ø) p
           go $ Proj (Var ø to) c proj pair
-      | z == this -> bind fresh \ø -> do
+      | z == this -> (>>=) fresh \ø -> do
           tc' <- repoint tc (Point ø) z
           go $ Proj sig (Var ø tc') proj pair
-      | x == this -> bind fresh \ø -> do
+      | x == this -> (>>=) fresh \ø -> do
           g' <- repoint g (Point ø) x
           go $ Proj sig c (Var ø (Var y g')) pair
-      | y == this -> bind fresh \ø -> do
+      | y == this -> (>>=) fresh \ø -> do
           g' <- repoint g (Point ø) y
           go $ Proj sig c (Var x (Var ø g')) pair
       | otherwise ->
@@ -155,13 +154,13 @@ instance MonadInterpret I E N P M where
     Zero -> pure Zero
     Succ m -> pure (Succ m)
     Peano z tc c0 cs@(Var x (Var y c1)) m
-      | z == this -> bind fresh \ø -> do
+      | z == this -> (>>=) fresh \ø -> do
           tc' <- repoint tc (Point ø) z
           go $ Peano ø tc' c0 cs m
-      | x == this -> bind fresh \ø -> do
+      | x == this -> (>>=) fresh \ø -> do
           c1' <- repoint c1 (Point ø) x
           go $ Peano z tc c0 (Var ø (Var y c1')) m
-      | y == this -> bind fresh \ø -> do
+      | y == this -> (>>=) fresh \ø -> do
           c1' <- repoint c1 (Point ø) y
           go $ Peano z tc c0 (Var x (Var ø c1')) m
       | otherwise ->
@@ -174,16 +173,16 @@ instance MonadInterpret I E N P M where
     Equality ta a b -> liftM3 Equality (go ta) (go a) (go b)
     Refl a -> Refl <$> go a
     Path ta (Var x (Var y (Var p tc))) (Var z c) a b path
-      | x == this -> bind fresh \ø -> do
+      | x == this -> (>>=) fresh \ø -> do
           tc' <- repoint tc (Point ø) x
           go $ Path ta (Var ø (Var y (Var p tc'))) (Var z c) a b path
-      | y == this -> bind fresh \ø -> do
+      | y == this -> (>>=) fresh \ø -> do
           tc' <- repoint tc (Point ø) y
           go $ Path ta (Var x (Var ø (Var p tc'))) (Var z c) a b path
-      | p == this -> bind fresh \ø -> do
+      | p == this -> (>>=) fresh \ø -> do
           tc' <- repoint tc (Point ø) x
           go $ Path ta (Var x (Var y (Var ø tc'))) (Var z c) a b path
-      | z == this -> bind fresh \ø -> do
+      | z == this -> (>>=) fresh \ø -> do
           c' <- repoint c (Point ø) z
           go $ Path ta (Var x (Var y (Var p tc))) (Var ø c') a b path
       | otherwise ->
@@ -200,7 +199,6 @@ instance MonadInterpret I E N P M where
    where
     go :: P -> M P
     go x = repoint x with this
-    bind = (>>=)
     liftM6 z ma mb mc md me mf = do
       a <- ma
       b <- mb
@@ -209,18 +207,14 @@ instance MonadInterpret I E N P M where
       e <- me
       f <- mf
       pure (z a b c d e f)
-  acknowledge (Var x tx) = do
-    c <- get
-    case c.gamma !? x of
-      Nothing -> put (N (insert x tx c.gamma) c.state)
-      Just p -> throwError $ AlreadyBound x p
   lookup this = get <&> \n -> n.gamma !? this
+  acknowledge (Var x tx) = (>>=) (lookup x) \case
+    Nothing -> modify \n -> n{gamma = insert x tx n.gamma}
+    Just p -> throwError $ AlreadyBound x p
 
   infer point = case point of
     U u -> pure $ U (succ u)
-    Point x -> do
-      Var _ tx <- given x
-      pure tx
+    Point i -> maybe (throwError $ UnknownIdentifier i) pure =<< lookup i
     Pi x ta tb -> U <$> sameUniverse (Var x ta) tb
     Lambda x ta b -> do
       typ ta
@@ -235,23 +229,17 @@ instance MonadInterpret I E N P M where
     Pair a b -> do
       ta <- infer a
       x <- fresh
-      tb <- localVar (Var x ta) do
-        infer =<< repoint b a x
+      tb <- localVar (Var x ta) $ infer =<< repoint b a x
       pure $ Sigma x ta tb
-    Proj
-      (Var _ tp@(Sigma _ ta tb))
-      (Var z tc)
-      (Var x (Var y g))
-      p@(Pair a b) -> do
-        tp === infer p
-        localVar (Var z tp) $ typ tc
-        localVar (Var x ta) $ localVar (Var y tb) do
-          c' <- repoint tc p z
-          g' <- repoint g a x >>= \g_ -> repoint g_ b y
-          c' === infer g'
-          pure c'
-    Proj (Var _ (Sigma _ _ _)) _ _ p ->
-      throwError $ NotASigmaType p
+    Proj (Var _ p@(Sigma _ ta tb)) (Var z tc) (Var x (Var y g)) (Pair a b) -> do
+      p === infer (Pair a b)
+      localVar (Var z p) $ typ tc
+      localVar (Var x ta) $ localVar (Var y tb) do
+        c' <- repoint tc (Pair a b) z
+        g' <- repoint g a x >>= \g_ -> repoint g_ b y
+        c' === infer g'
+        pure c'
+    Proj (Var _ (Sigma _ _ _)) _ _ p -> throwError $ NotASigmaType p
     Proj (Var _ tp) _ _ _ -> throwError $ NotAPair tp
     Sum ta tb -> U <$> sameUniverse (Var "" ta) tb
     InL a -> do
@@ -271,10 +259,8 @@ instance MonadInterpret I E N P M where
     Single -> pure Singleton
     Naturals -> pure (U 0)
     Zero -> pure Naturals
-    Succ m -> do
-      Naturals === infer m
-      pure Naturals
-    Peano z tc c0 (Var x (Var y cs)) mm -> case mm of
+    Succ m -> Naturals === infer m >> pure Naturals
+    Peano z tc c0 (Var x (Var y cs)) nat -> case nat of
       Zero -> do
         localVar (Var z Naturals) $ typ tc
         tc' <- repoint tc Zero x
@@ -287,7 +273,7 @@ instance MonadInterpret I E N P M where
           cs' <- repoint cs (Succ m) x
           tc' === infer cs'
         pure tc'
-      _ -> throwError $ NotANatural mm
+      _ -> throwError $ NotANatural nat
     Equality ta a b -> do
       ta === infer a
       ta === infer b
@@ -311,12 +297,6 @@ instance MonadInterpret I E N P M where
     ta <- infer a
     unless (t == ta) do
       throwError $ Unequal t ta
-
-given :: I -> M (Var I P)
-given i =
-  lookup i >>= \case
-    Nothing -> throwError $ UnknownIdentifier i
-    Just tx -> pure $ Var i tx
 
 typ :: P -> M ()
 typ = void . universe

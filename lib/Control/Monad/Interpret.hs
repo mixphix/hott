@@ -43,8 +43,8 @@ class
   MonadInterpret i e n p m
     | m -> i e n p
   where
-  acknowledge :: Var i p -> m ()
   lookup :: i -> m (Maybe p)
+  acknowledge :: Var i p -> m ()
 
   fresh :: m i
   repoint :: p -> p -> i -> m p
