@@ -47,6 +47,8 @@ import Text.Parsec
 import Text.Parsec.Text (Parser)
 import Text.Parsec.Token qualified as Token
 
+import Language.Hott (Var (Var))
+import Language.Hott qualified as Hott (Point (..))
 import Language.Hott.Syntax
 
 tk :: (Monad m) => Token.GenTokenParser Text u m
@@ -111,15 +113,15 @@ tk@Token.TokenParser
       }
 
 data Source l
-  = Data Lbl l l
+  = Data (Label l) l l
   | Expression l
   | Pattern l
 
 class (MonadInfer l m) => MonadSource l m where
   source :: Label l -> Source l -> m ()
 
-instance (MonadInfer Point m) => MonadSource Point m where
-  source :: Label Point -> Source Point -> m ()
+instance (MonadInfer Hott.Point m) => MonadSource Hott.Point m where
+  source :: Label Hott.Point -> Source Hott.Point -> m ()
   source scope = \case
     Data a ta impl -> do
       ta === infer impl
