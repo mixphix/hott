@@ -1,15 +1,14 @@
-module Language.Hott (Lbl (Lbl), Var (Var), Point (..)) where
+module Language.Hott.Structure (Point (..), E (..)) where
 
-import Data.String (IsString)
+import Control.Monad.Interpret (HasParseErrors (..), Var)
 import Data.Text (Text)
 import Numeric.Natural (Natural)
-import Prelude (Eq, Ord, Semigroup, Show)
+import Text.Parsec qualified as Parsec
+import Prelude (Eq, Ord, Show)
 
-newtype Lbl = Lbl Text deriving (IsString, Eq, Ord, Semigroup, Show)
-data Var x = Var Lbl x deriving (Eq, Ord, Show)
 data Point
   = U Natural
-  | Point Lbl
+  | Point Text
   | Pi (Var Point) Point
   | Lam (Var Point) Point
   | App Point Point
@@ -32,3 +31,16 @@ data Point
   | FunExt Point Point
   | UA Natural Point Point
   deriving (Eq, Ord, Show)
+data E
+  = Crash
+  | NotInContext Text
+  | AlreadyBound Text Point
+  | Unequal Point Point
+  | UniverseMismatch Point Natural Point Natural
+  | NotAType Point Point
+  | NotAFunction Point
+  | NotAPair Point
+  | NotANatural Point
+  | Misparse Parsec.ParseError
+instance HasParseErrors E where
+  parseFailure = Misparse

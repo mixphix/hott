@@ -38,6 +38,7 @@ module Language.Hott.Source
 where
 
 import Control.Monad
+import Control.Monad.Interpret
 import Data.Bool
 import Data.Char
 import Data.Eq
@@ -47,8 +48,7 @@ import Text.Parsec
 import Text.Parsec.Text (Parser)
 import Text.Parsec.Token qualified as Token
 
-import Language.Hott (Var (Var))
-import Language.Hott qualified as Hott (Point (..))
+import Language.Hott.Structure qualified as Hott
 import Language.Hott.Syntax
 
 tk :: (Monad m) => Token.GenTokenParser Text u m
@@ -117,10 +117,10 @@ data Source l
   | Expression l
   | Pattern l
 
-class (MonadInfer l m) => MonadSource l m where
+class (MonadInterpret l m) => MonadSource l m where
   source :: Label l -> Source l -> m ()
 
-instance (MonadInfer Hott.Point m) => MonadSource Hott.Point m where
+instance (MonadInterpret Hott.Point m) => MonadSource Hott.Point m where
   source :: Label Hott.Point -> Source Hott.Point -> m ()
   source scope = \case
     Data a ta impl -> do

@@ -36,6 +36,8 @@ library
   import:          settings
   hs-source-dirs:  lib
   exposed-modules:
-    Language.Hott
+    Control.Monad.Interpret
+
     Language.Hott.Source
+    Language.Hott.Structure
     Language.Hott.Syntax

@@ -1,197 +1,113 @@
-module Language.Hott.Syntax
-  ( InferError (..)
-  , MonadInfer (..)
-  , InferT (..)
-  , Infer
-  , InterpretT (..)
-  , Interpret
-  , runInferT
-  , runInterpretT
-  , given
-  , typ
-  , universe
-  , sameUniverse
-  , (===)
-  , (-->)
-  , (**)
-  , negate
-  ) where
+{-# OPTIONS_GHC -Wno-orphans #-}
+
+module Language.Hott.Syntax where
 
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Except
+import Control.Monad.Interpret
 import Control.Monad.State
 import Data.Bool
-import Data.Either
 import Data.Eq
 import Data.Function
 import Data.Functor.Identity
-import Data.Kind (Constraint, Type)
+import Data.Kind (Type)
 import Data.Map.Strict (Map, (!?))
 import Data.Map.Strict qualified as Map
 import Data.Maybe
 import Data.Semigroup (Semigroup ((<>)))
 import Data.String
 import Data.Text (Text)
-import Data.Tuple
 import GHC.Enum
 import GHC.Show
 import Numeric.Natural (Natural)
-import Text.Parsec qualified as Parsec
+import Text.Parsec (ParsecT)
 
-import Language.Hott (Var (Var))
-import Language.Hott qualified as Hott (Lbl, Point (..))
+import Language.Hott.Structure (E (..))
+import Language.Hott.Structure qualified as Hott (Point (..))
 
-data InferError l
-  = Crash
-  | NotInContext (Label l)
-  | AlreadyBound (Label l) l
-  | Unequal l l
-  | UniverseMismatch l Natural l Natural
-  | NotAType l l
-  | NotAFunction l
-  | NotAPair l
-  | NotANatural l
-  | ParseError Parsec.ParseError
-
-type MonadInfer :: Type -> (Type -> Type) -> Constraint
-class (Monad m, MonadError (InferError l) m) => MonadInfer l m where
-  failure :: InferError l -> m x
-  failure = throwError
-
-  type Label l :: Type
-  fresh :: m (Label l)
-  repoint :: l -> l -> Label l -> m l
-
-  type Context l :: Type
-  context :: m (Context l)
-  lookup :: Label l -> m (Maybe l)
-
-  acknowledge :: Var l -> m ()
-  locally :: Context l -> m x -> m x
-  default locally :: (MonadState (Context l) m) => Context l -> m x -> m x
-  locally ctx act = do
-    c0 <- get
-    put ctx
-    x <- act
-    put c0
-    pure x
-  localVar :: Var l -> m x -> m x
-  default localVar :: (MonadState (Context l) m) => Var l -> m x -> m x
-  localVar var act = do
-    ctx <- context
-    acknowledge var
-    x <- act
-    put ctx
-    pure x
-
-  infer :: l -> m l
-  check :: l -> l -> m ()
-  default check :: (Eq l) => l -> l -> m ()
-  check a t = do
-    ta <- infer a
-    unless (t == ta) $ failure (Unequal t ta)
-
-given :: (MonadInfer Hott.Point m) => Hott.Lbl -> m (Var Hott.Point)
+given :: (MonadInterpret Hott.Point m) => Label Hott.Point -> m (Var Hott.Point)
 given name =
-  context >>= \ctx -> case ctx !? name of
-    Nothing -> failure (NotInContext name)
+  lookup name >>= \case
+    Nothing -> failure (HottError $ NotInContext name)
     Just tx -> pure (Var name tx)
 
-typ :: (MonadInfer Hott.Point m) => Hott.Point -> m ()
+typ :: (MonadInterpret Hott.Point m) => Hott.Point -> m ()
 typ = void . universe
 
-universe :: (MonadInfer Hott.Point m) => Hott.Point -> m Natural
+universe :: (MonadInterpret Hott.Point m) => Hott.Point -> m Natural
 universe point =
   infer point >>= \case
     Hott.U i -> pure i
-    t -> failure (NotAType point t)
+    t -> failure (HottError $ NotAType point t)
 
 sameUniverse ::
-  (MonadInfer Hott.Point m) => Var Hott.Point -> Hott.Point -> m Natural
+  (MonadInterpret Hott.Point m) => Var Hott.Point -> Hott.Point -> m Natural
 sameUniverse (Var _ p0) p1 = do
   u0 <- universe p0
   u1 <- universe p1
-  unless (u0 == u1) $ failure (UniverseMismatch p0 u0 p1 u1)
+  unless (u0 == u1) $ failure (HottError $ UniverseMismatch p0 u0 p1 u1)
   pure u0
 
-(===) :: (MonadInfer Hott.Point m) => Hott.Point -> m Hott.Point -> m ()
+(===) :: (MonadInterpret Hott.Point m) => Hott.Point -> m Hott.Point -> m ()
 p0 === run = do
   p1 <- run
-  unless (p0 == p1) $ failure (Unequal p0 p1)
+  unless (p0 == p1) $ failure (HottError $ Unequal p0 p1)
 
-(-->) :: (MonadInfer Hott.Point m) => Hott.Point -> Hott.Point -> m Hott.Point
+(-->) ::
+  (MonadInterpret Hott.Point m) => Hott.Point -> Hott.Point -> m Hott.Point
 a --> b = do
   ui <- universe a
   ui' <- universe b
   x <- (<>) "_" <$> fresh
   let fun = Hott.Pi (Var x a) b
-  unless (ui == ui') $ failure (UniverseMismatch a ui b ui')
+  unless (ui == ui') $ failure (HottError $ UniverseMismatch a ui b ui')
   pure fun
 
-(**) :: (MonadInfer Hott.Point m) => Hott.Point -> Hott.Point -> m Hott.Point
+(**) ::
+  (MonadInterpret Hott.Point m) => Hott.Point -> Hott.Point -> m Hott.Point
 a ** b = do
   ui <- universe a
   ui' <- universe b
   x <- (<>) "_" <$> fresh
   let pair = Hott.Sig (Var x a) b
-  unless (ui == ui') $ failure (UniverseMismatch a ui b ui')
+  unless (ui == ui') $ failure (HottError $ UniverseMismatch a ui b ui')
   pure pair
 
-negate :: (MonadInfer Hott.Point m) => Hott.Point -> m Hott.Point
+negate :: (MonadInterpret Hott.Point m) => Hott.Point -> m Hott.Point
 negate point = do
   typ point
   x <- fresh
   pure (Hott.Pi (Var x point) Hott.Empty)
 
-type InferT :: Type -> (Type -> Type) -> Type -> Type
-newtype InferT l m x = Infer
-  {getInferT :: ExceptT (InferError l) (State (Map Hott.Lbl l, Natural)) x}
-  deriving
+type Hott :: Type -> Type
+newtype Hott x = Hott
+  { unHott ::
+      ParsecT
+        Text
+        ()
+        ( ExceptT (Failure Hott.Point) (StateT (Context Hott.Point) Identity)
+        )
+        x
+  }
+  deriving newtype
     ( Functor
     , Applicative
     , Monad
-    , MonadError (InferError l)
-    , MonadState (Map Hott.Lbl l, Natural)
+    , MonadError (Failure Hott.Point)
+    , MonadState (Context Hott.Point)
     )
-type Infer l = InferT l Identity
+instance HasParseErrors (Failure Hott.Point) where
+  parseFailure = HottError . parseFailure
 
-runInferT ::
-  InferT l m x ->
-  (Map Hott.Lbl l, Natural) ->
-  (Either (InferError l) x, (Map Hott.Lbl l, Natural))
-runInferT (Infer i) = runState (runExceptT i)
-
-type InterpretT :: Type -> (Type -> Type) -> Type -> Type
-newtype InterpretT l m x = Interpret
-  {getInterpretT :: Parsec.ParsecT Text () (InferT l m) x}
-  deriving
-    ( Functor
-    , Applicative
-    , Monad
-    , MonadError (InferError l)
-    , MonadState (Map Hott.Lbl l, Natural)
-    )
-type Interpret l = InterpretT l Identity
-
-runInterpretT ::
-  InterpretT l m x ->
-  Text ->
-  (Map Hott.Lbl l, Natural) ->
-  Either (InferError l) (x, (Map Hott.Lbl l, Natural))
-runInterpretT (Interpret p) src init =
-  case runInferT (Parsec.runParserT p () "" src) init of
-    (Left x, _) -> Left x
-    (Right (Left x), _) -> Left (ParseError x)
-    (Right (Right x), ctx) -> Right (x, ctx)
-
-instance (Monad m) => MonadInfer Hott.Point (InterpretT Hott.Point m) where
-  type Label Hott.Point = Hott.Lbl
+instance MonadInterpret Hott.Point Hott where
+  newtype Failure Hott.Point = HottError E
+  type Label Hott.Point = Text
   fresh = do
-    (ctx, freshness) <- get
-    put (ctx, succ freshness)
+    Context ctx freshness <- get
+    put (Context ctx $ succ freshness)
     pure ("_" <> fromString (show freshness))
-  lookup name = gets ((!? name) . fst)
+  lookup name = gets \(Context ctx _) -> ctx !? name
   repoint point with name = case point of
     Hott.U n -> pure (Hott.U n)
     Hott.Point p -> pure if p == name then with else Hott.Point p
@@ -289,24 +205,24 @@ instance (Monad m) => MonadInfer Hott.Point (InterpretT Hott.Point m) where
     go x = go x
     bind = (>>=)
 
-  type Context Hott.Point = Map Hott.Lbl Hott.Point
-  context = gets fst
+  data Context Hott.Point = Context (Map Text Hott.Point) Natural
+  context = get
   acknowledge (Var name ty) = do
-    (ctx, freshness) <- get
+    Context ctx freshness <- get
     case ctx !? name of
-      Nothing -> put (Map.insert name ty ctx, freshness)
-      Just _ -> failure (AlreadyBound name ty)
+      Nothing -> put $ Context (Map.insert name ty ctx) freshness
+      Just _ -> failure (HottError $ AlreadyBound name ty)
   locally c act = do
-    (ctx, freshness) <- get
-    put (c, freshness)
+    Context ctx freshness <- get
+    put c
     x <- act
-    put (ctx, freshness)
+    put (Context ctx freshness)
     pure x
   localVar var act = do
-    (ctx, freshness) <- get
+    Context ctx freshness <- get
     acknowledge var
     x <- act
-    put (ctx, freshness)
+    put (Context ctx freshness)
     pure x
 
   infer point = case point of
@@ -323,7 +239,7 @@ instance (Monad m) => MonadInfer Hott.Point (InterpretT Hott.Point m) where
       ta === infer a
       typ tb
       repoint tb a x
-    Hott.App f _ -> failure (NotAFunction f)
+    Hott.App f _ -> failure (HottError $ NotAFunction f)
     Hott.Sig (Var x ta) tb -> Hott.U <$> sameUniverse (Var x ta) tb
     Hott.Pair a b -> do
       ta <- infer a
@@ -343,8 +259,8 @@ instance (Monad m) => MonadInfer Hott.Point (InterpretT Hott.Point m) where
           g' <- repoint g a x >>= \g_ -> repoint g_ b y
           c' === infer g'
           pure c'
-    Hott.Proj (Var _ (Hott.Sig _ _)) _ _ p -> failure (NotAPair p)
-    Hott.Proj (Var _ tp) _ _ _ -> failure (NotAPair tp)
+    Hott.Proj (Var _ (Hott.Sig _ _)) _ _ p -> failure (HottError $ NotAPair p)
+    Hott.Proj (Var _ tp) _ _ _ -> failure (HottError $ NotAPair tp)
     Hott.Sum ta tb -> Hott.U <$> sameUniverse (Var "" ta) tb
     Hott.InL a -> do
       ta <- infer a
@@ -379,7 +295,7 @@ instance (Monad m) => MonadInfer Hott.Point (InterpretT Hott.Point m) where
           cs' <- repoint cs (Hott.Succ n) x
           tc' === infer cs'
         pure tc'
-      _ -> failure (NotANatural m)
+      _ -> failure (HottError $ NotANatural m)
     Hott.Equality ta a b -> do
       ta === infer a
       ta === infer b
@@ -397,5 +313,8 @@ instance (Monad m) => MonadInfer Hott.Point (InterpretT Hott.Point m) where
         repoint tc2 (Hott.Refl (Hott.Point z)) p
       localVar (Var z ta) $ tc' === infer c
       pure tc'
-    Hott.FunExt _f _g -> failure Crash
-    Hott.UA _i _ta _tb -> failure Crash
+    Hott.FunExt _f _g -> failure (HottError Crash)
+    Hott.UA _i _ta _tb -> failure (HottError Crash)
+  check a t = do
+    ta <- infer a
+    unless (t == ta) $ failure (HottError $ Unequal t ta)
