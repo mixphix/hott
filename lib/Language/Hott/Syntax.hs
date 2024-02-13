@@ -68,7 +68,6 @@ runHottM (HottM t) = runInterpret t
 
 instance MonadInterpret Hott.P HottM where
   newtype Failure Hott.P = HottError Hott.E
-  type Label Hott.P = Text
   fresh = do
     Context ctx freshness <- get
     put (Context ctx $ succ freshness)
@@ -273,7 +272,7 @@ instance MonadInterpret Hott.P HottM where
     ta <- infer a
     unless (t == ta) $ failure (HottError $ Hott.Unequal t ta)
 
-given :: Label Hott.P -> HottM (Var Hott.P)
+given :: Text -> HottM (Var Hott.P)
 given name =
   lookup name >>= \case
     Nothing -> failure (HottError $ Hott.NotInContext name)

@@ -42,13 +42,12 @@ class
   failure :: Failure p -> m x
   failure = throwError
 
-  type Label p :: Type
-  fresh :: m (Label p)
-  repoint :: p -> p -> Label p -> m p
+  fresh :: m Text
+  repoint :: p -> p -> Text -> m p
 
   data Context p :: Type
   context :: m (Context p)
-  lookup :: Label p -> m (Maybe p)
+  lookup :: Text -> m (Maybe p)
   acknowledge :: Var p -> m ()
   locally :: Context p -> m x -> m x
   default locally :: (MonadState (Context p) m) => Context p -> m x -> m x
