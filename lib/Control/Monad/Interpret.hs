@@ -1,6 +1,8 @@
 module Control.Monad.Interpret
   ( Var (Var)
   , MonadInterpret (..)
+  , locally
+  , localVar
   , InterpretT
   , runInterpretT
   , Interpret
@@ -42,33 +44,38 @@ class
   failure :: Failure p -> m x
   failure = throwError
 
-  fresh :: m Text
-  repoint :: p -> p -> Text -> m p
-
   data Context p :: Type
+
   context :: m (Context p)
+  default context :: (MonadState (Context p) m) => m (Context p)
+  context = get
   setContext :: Context p -> m ()
   default setContext :: (MonadState (Context p) m) => Context p -> m ()
   setContext = put
-  lookup :: Text -> m (Maybe p)
+
   acknowledge :: Var p -> m ()
-  locally :: Context p -> m x -> m x
-  locally ctx act = do
-    c0 <- context
-    setContext ctx
-    x <- act
-    setContext c0
-    pure x
-  localVar :: Var p -> m x -> m x
-  localVar var act = do
-    ctx <- context
-    acknowledge var
-    x <- act
-    setContext ctx
-    pure x
+  lookup :: Text -> m (Maybe p)
+
+  fresh :: m Text
+  repoint :: p -> p -> Text -> m p
 
   infer :: p -> m p
   check :: p -> p -> m ()
+
+locally :: (MonadInterpret p m) => Context p -> m x -> m x
+locally ctx act = do
+  c0 <- context
+  setContext ctx
+  x <- act
+  setContext c0
+  pure x
+localVar :: (MonadInterpret p m) => Var p -> m x -> m x
+localVar var act = do
+  ctx <- context
+  acknowledge var
+  x <- act
+  setContext ctx
+  pure x
 
 type InterpretT :: Type -> (Type -> Type) -> Type -> Type
 type InterpretT p m x =

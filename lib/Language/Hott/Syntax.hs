@@ -22,6 +22,7 @@ import Data.Bool
 import Data.Either
 import Data.Eq
 import Data.Function
+import Data.Functor
 import Data.Functor.Identity
 import Data.Kind (Type)
 import Data.Map.Strict (Map, (!?))
@@ -69,10 +70,10 @@ runHottM (HottM t) = runInterpret t
 instance MonadInterpret Hott.P HottM where
   newtype Failure Hott.P = HottError Hott.E
   fresh = do
-    Context ctx freshness <- get
-    put (Context ctx $ succ freshness)
-    pure ("_" <> fromString (show freshness))
-  lookup name = gets \(Context ctx _) -> ctx !? name
+    c <- context
+    setContext (C c.gamma (succ c.state))
+    pure ("_" <> fromString (show c.state))
+  lookup name = context <&> \c -> c.gamma !? name
   repoint point with name = case point of
     Hott.U n -> pure (Hott.U n)
     Hott.Point p -> pure if p == name then with else Hott.Point p
@@ -169,12 +170,14 @@ instance MonadInterpret Hott.P HottM where
     go x = repoint x with name
     bind = (>>=)
 
-  data Context Hott.P = Context (Map Text Hott.P) Natural
-  context = get
+  data Context Hott.P = C
+    { gamma :: Map Text Hott.P
+    , state :: Natural
+    }
   acknowledge (Var name ty) = do
-    Context ctx freshness <- get
-    case ctx !? name of
-      Nothing -> put $ Context (Map.insert name ty ctx) freshness
+    c <- context
+    case c.gamma !? name of
+      Nothing -> setContext (C (Map.insert name ty c.gamma) c.state)
       Just _ -> failure (HottError $ Hott.AlreadyBound name ty)
 
   infer point = case point of
