@@ -13,6 +13,7 @@ module Language.Hott.Syntax
   , (-->)
   , (**)
   , negate
+  , (===)
   ) where
 
 import Control.Applicative

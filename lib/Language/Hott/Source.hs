@@ -3,7 +3,7 @@
 {-# OPTIONS_GHC -Wno-missing-signatures #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
-module Language.Hott.Src
+module Language.Hott.Source
   ( Parser
   , identifier
   , reserved
@@ -37,22 +37,12 @@ module Language.Hott.Src
   )
 where
 
-import Control.Applicative
 import Control.Monad
 import Data.Bool
 import Data.Char
 import Data.Eq
-import Data.Foldable
-import Data.Kind
-import Data.List.NonEmpty
-import Data.Map.Strict (Map)
-import Data.Maybe
-import Data.Ord
 import Data.Semigroup
 import Data.Text (Text)
-import Data.Traversable
-import Data.Wedge
-import GHC.Show
 import Text.Parsec
 import Text.Parsec.Text (Parser)
 import Text.Parsec.Token qualified as Token
@@ -120,24 +110,25 @@ tk@Token.TokenParser
           ]
       }
 
-type Src :: Type -> (Type -> Type) -> Type
-data Src l m
-  = SrcScope Name [Src l m]
-  | SrcData Name (m l) (m [m l])
-  | SrcExpression (m l)
-  | SrcPattern (m l)
+data Source l
+  = Data Name l l
+  | Expression l
+  | Pattern l
 
 class (MonadInfer l m) => MonadSource l m where
-  source :: Src l m -> m ()
+  source :: Name -> Source l -> m ()
 
 instance (MonadInfer Point m) => MonadSource Point m where
-  source :: Src Point m -> m ()
-  source = \case
-    SrcScope scope src -> do
-      traverse_ source src
-    SrcData name point impl -> do
-      _
-    SrcExpression expr -> do
-      _
-    SrcPattern patt -> do
-      _
+  source :: Name -> Source Point -> m ()
+  source (Name scope) = \case
+    Data (Name a) ta impl -> do
+      ta === infer impl
+      acknowledge (Var (Name (scope <> "." <> a)) ta)
+    Expression x -> do
+      tx <- infer x
+      name <- fresh
+      acknowledge (Var (Name (scope <> "." <> name)) tx)
+    Pattern p -> do
+      tp <- infer p
+      name <- fresh
+      acknowledge (Var (Name (scope <> "." <> name)) tp)
