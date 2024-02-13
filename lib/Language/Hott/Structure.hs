@@ -63,27 +63,36 @@ data N = N {gamma :: Map I P, state :: Natural} deriving (Eq, Ord, Show)
 -- | Point
 data P
   = U Natural
-  | Point I
-  | Pi I P P
+  | --
+    Point I
+  | --
+    Pi I P P
   | Lambda I P P
   | Apply P P
-  | Sigma I P P
+  | --
+    Sigma I P P
   | Pair P P
   | Proj (Var I P) (Var I P) (Var I (Var I P)) P
-  | Sum P P
+  | --
+    Sum P P
   | InL P
   | InR P
-  | Empty
-  | Singleton
+  | --
+    Empty
+  | --
+    Singleton
   | Single
-  | Naturals
+  | --
+    Naturals
   | Zero
   | Succ P
   | Peano I P P (Var I (Var I P)) P
-  | Equality P P P
+  | --
+    Equality P P P
   | Refl P
   | Path P (Var I (Var I (Var I P))) (Var I P) P P P
-  | FunExt P P
+  | --
+    FunExt P P
   | UA Natural P P
   deriving (Eq, Ord, Show)
 
@@ -102,7 +111,9 @@ instance MonadInterpret I E N P M where
     go $ "_" <> fromString (show n.state)
   repoint point with this = case point of
     U u -> pure (U u)
+    --
     Point p -> pure if p == this then with else Point p
+    --
     Pi x ta tb
       | x == this -> fresh \ø -> do
           ta' <- repoint ta (Point ø) x
@@ -116,6 +127,7 @@ instance MonadInterpret I E N P M where
           go (Lambda ø ta' b')
       | otherwise -> liftM2 (Lambda x) (go ta) (go b)
     Apply p0 p1 -> liftM2 Apply (go p0) (go p1)
+    --
     Sigma x ta tb
       | x == this -> fresh \ø -> do
           ta' <- repoint ta (Point ø) x
@@ -143,12 +155,16 @@ instance MonadInterpret I E N P M where
             (Var z <$> go tc)
             (Var x . Var y <$> go g)
             (go pair)
+    --
     Sum ta tb -> liftM2 Sum (go ta) (go tb)
     InL a -> InL <$> go a
     InR b -> InR <$> go b
+    --
     Empty -> pure Empty
+    --
     Singleton -> pure Singleton
     Single -> pure Single
+    --
     Naturals -> pure Naturals
     Zero -> pure Zero
     Succ m -> pure (Succ m)
@@ -169,6 +185,7 @@ instance MonadInterpret I E N P M where
             (go c0)
             (Var x . Var y <$> go c1)
             (go m)
+    --
     Equality ta a b -> liftM3 Equality (go ta) (go a) (go b)
     Refl a -> Refl <$> go a
     Path ta (Var x (Var y (Var p tc))) (Var z c) a b path
@@ -193,6 +210,7 @@ instance MonadInterpret I E N P M where
             (go a)
             (go b)
             (go path)
+    --
     FunExt f g -> liftM2 FunExt (go f) (go g)
     UA i ta tb -> liftM2 (UA i) (go ta) (go tb)
    where
@@ -213,7 +231,9 @@ instance MonadInterpret I E N P M where
 
   infer point = case point of
     U u -> pure $ U (succ u)
+    --
     Point i -> maybe (throwError $ UnknownIdentifier i) pure =<< lookup i
+    --
     Pi _ ta tb -> U <$> sameUniverse ta tb
     Lambda x ta b -> do
       typ ta
@@ -224,6 +244,7 @@ instance MonadInterpret I E N P M where
       localVar (Var x ta) $ typ tb
       repoint tb a x
     Apply f _ -> throwError $ NotAPiType f
+    --
     Sigma _ ta tb -> U <$> sameUniverse ta tb
     Pair a b -> do
       ta <- infer a
@@ -240,6 +261,7 @@ instance MonadInterpret I E N P M where
         pure c'
     Proj (Var _ (Sigma _ _ _)) _ _ p -> throwError $ NotASigmaType p
     Proj (Var _ tp) _ _ _ -> throwError $ NotAPair tp
+    --
     Sum ta tb -> U <$> sameUniverse ta tb
     InL a -> do
       ta <- infer a
@@ -253,9 +275,12 @@ instance MonadInterpret I E N P M where
       fresh \ø -> do
         acknowledge (Var ø ui)
         pure $ Sum (Point ø) tb
+    --
     Empty -> pure (U 0)
+    --
     Singleton -> pure (U 0)
     Single -> pure Singleton
+    --
     Naturals -> pure (U 0)
     Zero -> pure Naturals
     Succ m -> check m Naturals >> pure Naturals
@@ -273,6 +298,7 @@ instance MonadInterpret I E N P M where
           check cs' tc'
         pure tc'
       _ -> throwError $ NotANatural nat
+    --
     Equality ta a b -> do
       check a ta
       check b ta
@@ -290,6 +316,7 @@ instance MonadInterpret I E N P M where
         repoint tc2 (Refl (Point z)) p
       localVar (Var z ta) $ check c tc'
       pure tc'
+    --
     FunExt _f _g -> throwError Crash
     UA _i _ta _tb -> throwError Crash
   check a t = do
