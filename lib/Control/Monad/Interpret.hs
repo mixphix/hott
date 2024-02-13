@@ -75,8 +75,8 @@ runInterpretT ::
   (InterpretT i e n p m x -> n -> Text -> m (Either e x, n))
 runInterpretT i c src =
   runStateT (runExceptT (Parsec.runParserT i () "" src)) c <&> \case
-    (Left f, n) -> (Left f, n)
-    (Right (Left f), n) -> (Left (misparse f), n)
+    (Left e, n) -> (Left e, n)
+    (Right (Left e), n) -> (Left (misparse e), n)
     (Right (Right x), n) -> (Right x, n)
 
 runInterpret ::
