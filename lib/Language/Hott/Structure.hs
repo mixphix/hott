@@ -305,7 +305,6 @@ instance MonadInterpret I E N P M where
         Nothing -> throwError (UnknownIdentifier ctor)
         Just π -> do
           unless (π == Point t) $ throwError (MistypedConstructor π)
-          traverse_ acknowledge fields
           pure (Point t)
     Case t ctor pats -> bind (lookup ctor) \case
       Nothing -> throwError (UnknownIdentifier ctor)
@@ -361,8 +360,10 @@ instance MonadInterpret I E N P M where
     ta <- infer a
     unless (t == ta) (throwError (Unequal t ta))
 
-  compute = \case
-    Apply (Lambda x ta b) a -> a √ ta >> repoint a x b
+  compute point = case point of
+    Apply (Lambda x ta b) a -> do
+      a √ ta
+      compute =<< repoint a x b
     Apply f _ -> throwError (NotAFunction f)
     --
     Proj (Var _ (Sigma q ta tb)) (Var z tc) (Var x (Var y g)) (Pair a b) -> do
@@ -370,23 +371,30 @@ instance MonadInterpret I E N P M where
       localVar (Var z (Sigma q ta tb)) $ typ tc
       localVar (Var x ta) $ localVar (Var y tb) do
         c' <- repoint (Pair a b) z tc
-        g' <- repoint a x g >>= repoint b y
+        g' <- (repoint b y <=< repoint a x) g
         g' √ c'
-        pure g'
+        compute g'
     Proj (Var _ (Sigma _ _ _)) _ _ p -> throwError (NotAPair p)
     Proj (Var _ tp) _ _ _ -> throwError (NotASigmaType tp)
     --
     Peano z tc c0 (Var x (Var y c1)) nat -> do
       localVar (Var z Naturals) $ typ tc
       case nat of
-        Zero -> pure c0
+        Zero -> compute c0
         Succ m -> do
           tc' <- repoint (Succ m) z tc
           localVar (Var x Naturals) $ localVar (Var y tc') do
             c1' <- repoint (Succ m) x c1
             c1' √ tc'
-            pure c1'
+            compute c1'
         _ -> throwError (NotANatural nat)
+    Ctor t ar ctor fields -> do
+      when (ar /= length fields) (throwError (NotAConstructor point))
+      bind (lookup ctor) \case
+        Nothing -> throwError (UnknownIdentifier ctor)
+        Just π -> do
+          unless (π == Point t) (throwError (MistypedConstructor π))
+          foldr localVar (pure (Point t)) fields
     p -> pure p
 
 typ :: P -> M ()
