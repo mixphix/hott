@@ -286,7 +286,7 @@ instance MonadInterpret I E N P M where
       localVar (Var z (Sigma q ta tb)) $ typ tc
       localVar (Var x ta) $ localVar (Var y tb) do
         c' <- repoint (Pair a b) z tc
-        g' <- repoint a x g >>= repoint b y
+        g' <- (repoint a x >=> repoint b y) g
         g' √ c'
         pure c'
     Proj (Var _ (Sigma _ _ _)) _ _ p -> throwError (NotAPair p)
@@ -338,7 +338,7 @@ instance MonadInterpret I E N P M where
     Equality ta a b -> do
       a √ ta
       b √ ta
-      U <$> universe ta
+      fmap U (universe ta)
     Refl a -> do
       ta <- infer a
       pure (Equality ta a a)
@@ -347,9 +347,11 @@ instance MonadInterpret I E N P M where
       b √ ta
       path √ Equality ta a b
       tc' <-
-        repoint (Point z) x tc
-          >>= repoint (Point z) y
-          >>= repoint (Refl (Point z)) p
+        ( repoint (Point z) x
+            >=> repoint (Point z) y
+            >=> repoint (Refl (Point z)) p
+          )
+          tc
       localVar (Var z ta) (c √ tc')
       pure tc'
     --
@@ -371,7 +373,7 @@ instance MonadInterpret I E N P M where
       localVar (Var z (Sigma q ta tb)) $ typ tc
       localVar (Var x ta) $ localVar (Var y tb) do
         c' <- repoint (Pair a b) z tc
-        g' <- (repoint b y <=< repoint a x) g
+        g' <- (repoint a x >=> repoint b y) g
         g' √ c'
         compute g'
     Proj (Var _ (Sigma _ _ _)) _ _ p -> throwError (NotAPair p)
