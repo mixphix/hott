@@ -10,11 +10,12 @@ module Language.Hott.Structure
   , sameUniverse
   , (-->)
   , (**)
-  , negate
+  -- , negate
   )
 where
 
 import Control.Applicative
+import Control.Block
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Interpret
@@ -22,20 +23,20 @@ import Control.Monad.State
 import Data.Bool
 import Data.Either
 import Data.Eq
+import Data.Foldable
 import Data.Function
-import Data.Functor
-import Data.Functor.Identity
 import Data.Map (Map)
 import Data.Map.Strict (insert, (!?))
 import Data.Maybe
 import Data.Ord
 import Data.Semigroup (Semigroup ((<>)))
+import Data.Semigroup qualified as Sg
 import Data.String
 import Data.Text (Text)
 import GHC.Enum
 import GHC.Show
 import Numeric.Natural (Natural)
-import Text.Parsec (ParseError, ParsecT)
+import Text.Parsec (ParseError)
 
 -- | Identifier
 newtype I = I Text deriving newtype (IsString, Eq, Ord, Semigroup, Show)
@@ -48,10 +49,11 @@ data E
   | Unequal P P
   | UniverseMismatch P Natural P Natural
   | NotAType P P
-  | NotAPiType P
+  | NotAFunction P
   | NotASigmaType P
   | NotAPair P
   | NotANatural P
+  | MistypedConstructor P
   | Misparse ParseError
   deriving (Eq, Show)
 
@@ -66,7 +68,7 @@ data P
   | --
     Point I
   | --
-    Pi I P P
+    Func I P P
   | Lambda I P P
   | Apply P P
   | --
@@ -74,14 +76,9 @@ data P
   | Pair P P
   | Proj (Var I P) (Var I P) (Var I (Var I P)) P
   | --
-    Sum P P
-  | InL P
-  | InR P
-  | --
-    Empty
-  | --
-    Singleton
-  | Single
+    Sum I [Var I [Var I P]]
+  | Ctor I I [Var I P] -- expressions
+  | Case I I [Either P (Var I P)] -- patterns
   | --
     Naturals
   | Zero
@@ -97,9 +94,8 @@ data P
   deriving (Eq, Ord, Show)
 
 -- Monad
-newtype M x = M (ParsecT Text () (ExceptT E (StateT N Identity)) x)
-  deriving newtype
-    (Functor, Applicative, Monad, MonadError E, MonadState N)
+newtype M x = M (Interpret I E N P x)
+  deriving newtype (Functor, Applicative, Monad, MonadError E, MonadState N)
 
 runM :: M x -> N -> Text -> (Either E x, N)
 runM (M t) = runInterpret t
@@ -108,46 +104,47 @@ instance MonadInterpret I E N P M where
   fresh go = do
     n <- get
     put (N n.gamma (succ n.state))
-    go $ "_" <> fromString (show n.state)
-  repoint point with this = case point of
+    go ("_" <> fromString (show n.state))
+
+  repoint with this = fix \go -> \case
     U u -> pure (U u)
     --
     Point p -> pure if p == this then with else Point p
     --
-    Pi x ta tb
+    Func x ta tb
       | x == this -> fresh \ø -> do
-          ta' <- repoint ta (Point ø) x
-          tb' <- repoint tb (Point ø) x
-          go (Pi ø ta' tb')
-      | otherwise -> liftM2 (Pi x) (go ta) (go tb)
+          ta' <- repoint (Point ø) x ta
+          tb' <- repoint (Point ø) x tb
+          go (Func ø ta' tb')
+      | otherwise -> liftM2 (Func x) (go ta) (go tb)
     Lambda x ta b
       | x == this -> fresh \ø -> do
-          ta' <- repoint ta (Point ø) x
-          b' <- repoint b (Point ø) x
+          ta' <- repoint (Point ø) x ta
+          b' <- repoint (Point ø) x b
           go (Lambda ø ta' b')
       | otherwise -> liftM2 (Lambda x) (go ta) (go b)
     Apply p0 p1 -> liftM2 Apply (go p0) (go p1)
     --
     Sigma x ta tb
       | x == this -> fresh \ø -> do
-          ta' <- repoint ta (Point ø) x
-          tb' <- repoint tb (Point ø) x
-          go (Pi ø ta' tb')
+          ta' <- repoint (Point ø) x ta
+          tb' <- repoint (Point ø) x tb
+          go (Func ø ta' tb')
       | otherwise -> liftM2 (Sigma x) (go ta) (go tb)
     Pair a b -> liftM2 Pair (go a) (go b)
     Proj sig@(Var p tp) c@(Var z tc) proj@(Var x (Var y g)) pair
       | p == this -> fresh \ø -> do
-          to <- repoint tp (Point ø) p
-          go $ Proj (Var ø to) c proj pair
+          to <- repoint (Point ø) p tp
+          go (Proj (Var ø to) c proj pair)
       | z == this -> fresh \ø -> do
-          tc' <- repoint tc (Point ø) z
-          go $ Proj sig (Var ø tc') proj pair
+          tc' <- repoint (Point ø) z tc
+          go (Proj sig (Var ø tc') proj pair)
       | x == this -> fresh \ø -> do
-          g' <- repoint g (Point ø) x
-          go $ Proj sig c (Var ø (Var y g')) pair
+          g' <- repoint (Point ø) x g
+          go (Proj sig c (Var ø (Var y g')) pair)
       | y == this -> fresh \ø -> do
-          g' <- repoint g (Point ø) y
-          go $ Proj sig c (Var x (Var ø g')) pair
+          g' <- repoint (Point ø) y g
+          go (Proj sig c (Var x (Var ø g')) pair)
       | otherwise ->
           liftM4
             Proj
@@ -156,51 +153,78 @@ instance MonadInterpret I E N P M where
             (Var x . Var y <$> go g)
             (go pair)
     --
-    Sum ta tb -> liftM2 Sum (go ta) (go tb)
-    InL a -> InL <$> go a
-    InR b -> InR <$> go b
-    --
-    Empty -> pure Empty
-    --
-    Singleton -> pure Singleton
-    Single -> pure Single
+    Sum t ctors
+      | t == this -> fresh \ø ->
+          Sum ø <$> for ctors \case
+            Var ctor fields
+              | ctor == this -> fresh \_ø ->
+                  Var _ø <$> for fields \case
+                    Var f tf
+                      | f == this -> fresh \__ø -> Var __ø <$> go tf
+                      | otherwise -> Var f <$> go tf
+              | otherwise -> do
+                  Var ctor <$> for fields \case
+                    Var f tf
+                      | f == this -> fresh \_ø -> Var _ø <$> go tf
+                      | otherwise -> Var f <$> go tf
+      | otherwise ->
+          Sum t <$> for ctors \case
+            Var ctor fields
+              | ctor == this -> fresh \ø ->
+                  Var ø <$> for fields \case
+                    Var f tf
+                      | f == this -> fresh \_ø -> Var _ø <$> go tf
+                      | otherwise -> Var f <$> go tf
+              | otherwise ->
+                  Var ctor <$> for fields \case
+                    Var f tf
+                      | f == this -> fresh \ø -> Var ø <$> go tf
+                      | otherwise -> Var f <$> go tf
+    Ctor t i fields
+      | i == this -> fresh \ø -> go (Ctor t ø fields)
+      | otherwise -> fresh \ø ->
+          Ctor t i <$> for fields \case
+            Var f tf
+              | f == this -> Var ø <$> go tf
+              | otherwise -> Var f <$> go tf
+    Case t ctor pats -> fresh \ø ->
+      Case t ctor <$> for pats \case
+        Left p -> Left <$> go p
+        Right (Var p tp)
+          | p == this -> Right . Var p <$> repoint (Point ø) p tp
+          | otherwise -> Right . Var p <$> go tp
     --
     Naturals -> pure Naturals
     Zero -> pure Zero
     Succ m -> pure (Succ m)
-    Peano z tc c0 cs@(Var x (Var y c1)) m
+    Peano z tc c0 (Var x (Var y c1)) m
       | z == this -> fresh \ø -> do
-          tc' <- repoint tc (Point ø) z
-          go $ Peano ø tc' c0 cs m
+          tc' <- repoint (Point ø) z tc
+          go (Peano ø tc' c0 (Var x (Var y c1)) m)
       | x == this -> fresh \ø -> do
-          c1' <- repoint c1 (Point ø) x
-          go $ Peano z tc c0 (Var ø (Var y c1')) m
+          c1' <- repoint (Point ø) x c1
+          go (Peano z tc c0 (Var ø (Var y c1')) m)
       | y == this -> fresh \ø -> do
-          c1' <- repoint c1 (Point ø) y
-          go $ Peano z tc c0 (Var x (Var ø c1')) m
+          c1' <- repoint (Point ø) y c1
+          go (Peano z tc c0 (Var x (Var ø c1')) m)
       | otherwise ->
-          liftM4
-            (Peano z)
-            (go tc)
-            (go c0)
-            (Var x . Var y <$> go c1)
-            (go m)
+          liftM4 (Peano z) (go tc) (go c0) (Var x . Var y <$> go c1) (go m)
     --
     Equality ta a b -> liftM3 Equality (go ta) (go a) (go b)
     Refl a -> Refl <$> go a
     Path ta (Var x (Var y (Var p tc))) (Var z c) a b path
       | x == this -> fresh \ø -> do
-          tc' <- repoint tc (Point ø) x
-          go $ Path ta (Var ø (Var y (Var p tc'))) (Var z c) a b path
+          tc' <- repoint (Point ø) x tc
+          go (Path ta (Var ø (Var y (Var p tc'))) (Var z c) a b path)
       | y == this -> fresh \ø -> do
-          tc' <- repoint tc (Point ø) y
-          go $ Path ta (Var x (Var ø (Var p tc'))) (Var z c) a b path
+          tc' <- repoint (Point ø) y tc
+          go (Path ta (Var x (Var ø (Var p tc'))) (Var z c) a b path)
       | p == this -> fresh \ø -> do
-          tc' <- repoint tc (Point ø) x
-          go $ Path ta (Var x (Var y (Var ø tc'))) (Var z c) a b path
+          tc' <- repoint (Point ø) x tc
+          go (Path ta (Var x (Var y (Var ø tc'))) (Var z c) a b path)
       | z == this -> fresh \ø -> do
-          c' <- repoint c (Point ø) z
-          go $ Path ta (Var x (Var y (Var p tc))) (Var ø c') a b path
+          c' <- repoint (Point ø) z c
+          go (Path ta (Var x (Var y (Var p tc))) (Var ø c') a b path)
       | otherwise ->
           liftM6
             Path
@@ -214,8 +238,6 @@ instance MonadInterpret I E N P M where
     FunExt f g -> liftM2 FunExt (go f) (go g)
     UA i ta tb -> liftM2 (UA i) (go ta) (go tb)
    where
-    go :: P -> M P
-    go x = repoint x with this
     liftM6 z ma mb mc md me mf = do
       a <- ma
       b <- mb
@@ -224,104 +246,139 @@ instance MonadInterpret I E N P M where
       e <- me
       f <- mf
       pure (z a b c d e f)
+
   lookup this = get <&> \n -> n.gamma !? this
-  acknowledge (Var x tx) = (>>=) (lookup x) \case
+
+  acknowledge (Var x tx) = bind (lookup x) \case
     Nothing -> modify \n -> n{gamma = insert x tx n.gamma}
-    Just p -> throwError $ AlreadyBound x p
+    Just p -> throwError (AlreadyBound x p)
 
   infer point = case point of
-    U u -> pure $ U (succ u)
+    U u -> pure (U (succ u))
     --
-    Point i -> maybe (throwError $ UnknownIdentifier i) pure =<< lookup i
+    Point i -> maybe (throwError (UnknownIdentifier i)) pure =<< lookup i
     --
-    Pi _ ta tb -> U <$> sameUniverse ta tb
+    Func _ ta tb -> U <$> sameUniverse ta tb
     Lambda x ta b -> do
       typ ta
       tb <- localVar (Var x ta) $ infer b
-      pure $ Pi x ta tb
-    Apply (Pi x ta tb) a -> do
-      check a ta
-      localVar (Var x ta) $ typ tb
-      repoint tb a x
-    Apply f _ -> throwError $ NotAPiType f
+      pure (Func x ta tb)
+    Apply (Lambda x ta b) a -> do
+      a √ ta
+      localVar (Var x ta) $ repoint a x =<< infer b
+    Apply f _ -> throwError (NotAFunction f)
     --
     Sigma _ ta tb -> U <$> sameUniverse ta tb
     Pair a b -> do
       ta <- infer a
-      fresh \ø -> do
-        tb <- localVar (Var ø ta) $ infer =<< repoint b a ø
-        pure $ Sigma ø ta tb
-    Proj (Var _ p@(Sigma _ ta tb)) (Var z tc) (Var x (Var y g)) (Pair a b) -> do
-      check (Pair a b) p
-      localVar (Var z p) $ typ tc
+      fresh \ø -> localVar (Var ø ta) do
+        tb <- infer =<< repoint a ø b
+        pure (Sigma ø ta tb)
+    Proj (Var _ (Sigma q ta tb)) (Var z tc) (Var x (Var y g)) (Pair a b) -> do
+      Pair a b √ Sigma q ta tb
+      localVar (Var z (Sigma q ta tb)) $ typ tc
       localVar (Var x ta) $ localVar (Var y tb) do
-        c' <- repoint tc (Pair a b) z
-        g' <- repoint g a x >>= \g_ -> repoint g_ b y
-        check g' c'
+        c' <- repoint (Pair a b) z tc
+        g' <- repoint a x g >>= repoint b y
+        g' √ c'
         pure c'
-    Proj (Var _ (Sigma _ _ _)) _ _ p -> throwError $ NotASigmaType p
-    Proj (Var _ tp) _ _ _ -> throwError $ NotAPair tp
+    Proj (Var _ (Sigma _ _ _)) _ _ p -> throwError (NotAPair p)
+    Proj (Var _ tp) _ _ _ -> throwError (NotASigmaType tp)
     --
-    Sum ta tb -> U <$> sameUniverse ta tb
-    InL a -> do
-      ta <- infer a
-      ui <- infer ta
-      fresh \ø -> do
-        acknowledge (Var ø ui)
-        pure $ Sum ta (Point ø)
-    InR b -> do
-      tb <- infer b
-      ui <- infer tb
-      fresh \ø -> do
-        acknowledge (Var ø ui)
-        pure $ Sum (Point ø) tb
-    --
-    Empty -> pure (U 0)
-    --
-    Singleton -> pure (U 0)
-    Single -> pure Singleton
+    Sum t ctors -> do
+      ui <-
+        fmap Sg.getMax . fold <$> for ctors \(Var i args) -> do
+          u <- universe =<< infer (Ctor t i args)
+          pure (Just (Sg.Max u))
+      u <- maybe (pure 0) universe =<< lookup t
+      pure (U (fromMaybe u ui))
+    Ctor t i fields -> bind (lookup i) \case
+      Nothing -> throwError (UnknownIdentifier i)
+      Just π -> do
+        unless (π == Point t) $ throwError (MistypedConstructor π)
+        traverse_ acknowledge fields
+        pure (Point t)
+    Case t ctor pats -> bind (lookup ctor) \case
+      Nothing -> throwError (UnknownIdentifier ctor)
+      Just π -> do
+        unless (π == Point t) $ throwError (MistypedConstructor π)
+        let applied = (=<<) . (compute .) . flip Apply
+        p <- reduceR (pure π) pats \case
+          Left p -> applied p
+          Right (Var _ p) -> applied p
+        p √ Point t
+        pure (Point t)
     --
     Naturals -> pure (U 0)
     Zero -> pure Naturals
-    Succ m -> check m Naturals >> pure Naturals
-    Peano z tc c0 (Var x (Var y cs)) nat -> case nat of
-      Zero -> do
-        localVar (Var z Naturals) $ typ tc
-        tc' <- repoint tc Zero x
-        check c0 tc'
-        pure tc'
-      Succ m -> do
-        localVar (Var z Naturals) $ typ tc
-        tc' <- repoint tc (Succ m) z
-        localVar (Var x Naturals) $ localVar (Var y tc') do
-          cs' <- repoint cs (Succ m) x
-          check cs' tc'
-        pure tc'
-      _ -> throwError $ NotANatural nat
+    Succ m -> m √ Naturals >> pure Naturals
+    Peano z tc c0 (Var x (Var y c1)) nat -> do
+      localVar (Var z Naturals) $ typ tc
+      case nat of
+        Zero -> do
+          tc' <- repoint Zero x tc
+          c0 √ tc'
+          pure tc'
+        Succ m -> do
+          tc' <- repoint (Succ m) z tc
+          localVar (Var x Naturals) $ localVar (Var y tc') do
+            c1' <- repoint (Succ m) x c1
+            c1' √ tc'
+            pure tc'
+        _ -> throwError (NotANatural nat)
     --
     Equality ta a b -> do
-      check a ta
-      check b ta
+      a √ ta
+      b √ ta
       U <$> universe ta
     Refl a -> do
       ta <- infer a
-      pure $ Equality ta a a
+      pure (Equality ta a a)
     Path ta (Var x (Var y (Var p tc))) (Var z c) a b path -> do
-      check a ta
-      check b ta
-      check path (Equality ta a b)
-      tc' <- do
-        tc1 <- repoint tc (Point z) x
-        tc2 <- repoint tc1 (Point z) y
-        repoint tc2 (Refl (Point z)) p
-      localVar (Var z ta) $ check c tc'
+      a √ ta
+      b √ ta
+      path √ Equality ta a b
+      tc' <-
+        repoint (Point z) x tc
+          >>= repoint (Point z) y
+          >>= repoint (Refl (Point z)) p
+      localVar (Var z ta) (c √ tc')
       pure tc'
     --
     FunExt _f _g -> throwError Crash
     UA _i _ta _tb -> throwError Crash
-  check a t = do
+
+  a √ t = do
     ta <- infer a
-    unless (t == ta) (throwError $ Unequal t ta)
+    unless (t == ta) (throwError (Unequal t ta))
+
+  compute = \case
+    Apply (Lambda x ta b) a -> a √ ta >> repoint a x b
+    Apply f _ -> throwError (NotAFunction f)
+    --
+    Proj (Var _ (Sigma q ta tb)) (Var z tc) (Var x (Var y g)) (Pair a b) -> do
+      Pair a b √ Sigma q ta tb
+      localVar (Var z (Sigma q ta tb)) $ typ tc
+      localVar (Var x ta) $ localVar (Var y tb) do
+        c' <- repoint (Pair a b) z tc
+        g' <- repoint a x g >>= repoint b y
+        g' √ c'
+        pure g'
+    Proj (Var _ (Sigma _ _ _)) _ _ p -> throwError (NotAPair p)
+    Proj (Var _ tp) _ _ _ -> throwError (NotASigmaType tp)
+    --
+    Peano z tc c0 (Var x (Var y c1)) nat -> do
+      localVar (Var z Naturals) $ typ tc
+      case nat of
+        Zero -> pure c0
+        Succ m -> do
+          tc' <- repoint (Succ m) z tc
+          localVar (Var x Naturals) $ localVar (Var y tc') do
+            c1' <- repoint (Succ m) x c1
+            c1' √ tc'
+            pure c1'
+        _ -> throwError (NotANatural nat)
+    p -> pure p
 
 typ :: P -> M ()
 typ = void . universe
@@ -330,20 +387,20 @@ universe :: P -> M Natural
 universe point =
   infer point >>= \case
     U u -> pure u
-    t -> throwError $ NotAType point t
+    t -> throwError (NotAType point t)
 
 sameUniverse :: P -> P -> M Natural
 sameUniverse p0 p1 = do
   u0 <- universe p0
   u1 <- universe p1
-  unless (u0 == u1) (throwError $ UniverseMismatch p0 u0 p1 u1)
+  unless (u0 == u1) (throwError (UniverseMismatch p0 u0 p1 u1))
   pure u0
 
 (-->) :: P -> P -> M P
-ta --> tb = sameUniverse ta tb >> fresh \ø -> pure (Pi ø ta tb)
+ta --> tb = sameUniverse ta tb >> fresh \ø -> pure (Func ø ta tb)
 
 (**) :: P -> P -> M P
 ta ** tb = sameUniverse ta tb >> fresh \ø -> pure (Sigma ø ta tb)
 
-negate :: P -> M P
-negate tx = typ tx >> fresh \x -> pure $ Pi x tx Empty
+-- negate :: P -> M P
+-- negate tx = typ tx >> fresh \x -> pure (Func x tx Bottom)

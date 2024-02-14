@@ -26,6 +26,7 @@ common settings
   build-depends:
     , base
     , containers
+    , control-block
     , mtl
     , parsec
     , text
@@ -38,5 +39,5 @@ library
   exposed-modules:
     Control.Monad.Interpret
 
-    Language.Hott.Source
     Language.Hott.Structure
+    Language.Hott.TokenParser

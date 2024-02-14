@@ -7,7 +7,8 @@ module Control.Monad.Interpret
     , fresh
     , repoint
     , infer
-    , check
+    , (√)
+    , compute
     )
   , locally
   , localVar
@@ -47,10 +48,11 @@ class
   acknowledge :: Var i p -> m ()
 
   fresh :: (i -> m x) -> m x
-  repoint :: p -> p -> i -> m p
+  repoint :: p -> i -> (p -> m p)
 
   infer :: p -> m p
-  check :: p -> p -> m ()
+  (√) :: p -> p -> m ()
+  compute :: p -> m p
 
 locally :: (MonadInterpret i e n p m) => n -> m x -> m x
 locally new interpret = do

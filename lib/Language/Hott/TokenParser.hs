@@ -2,7 +2,7 @@
 {-# OPTIONS_GHC -Wno-missing-signatures #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
-module Language.Hott.Source
+module Language.Hott.TokenParser
   ( Parser
   , identifier
   , reserved
@@ -37,17 +37,13 @@ module Language.Hott.Source
 where
 
 import Control.Monad
-import Control.Monad.Interpret
 import Data.Bool
 import Data.Char
 import Data.Eq
-import Data.Semigroup
 import Data.Text (Text)
 import Text.Parsec
 import Text.Parsec.Text (Parser)
 import Text.Parsec.Token qualified as Token
-
-import Language.Hott.Structure qualified as Hott
 
 tk :: (Monad m) => Token.GenTokenParser Text u m
 tk@Token.TokenParser
@@ -97,6 +93,7 @@ tk@Token.TokenParser
           , "by"
           , "let"
           , "where"
+          , "_|_"
           , "_"
           ]
       , reservedOpNames =
@@ -109,24 +106,3 @@ tk@Token.TokenParser
           , "∑" -- option-W
           ]
       }
-
-data Source i p
-  = Data i p p
-  | Expression p
-  | Pattern p
-
-class (MonadInterpret i e n p m) => MonadSource i e n p m where
-  source :: i -> Source i p -> m ()
-
-instance MonadSource Hott.I Hott.E Hott.N Hott.P Hott.M where
-  source :: Hott.I -> Source Hott.I Hott.P -> Hott.M ()
-  source scope = \case
-    Data a ta impl -> do
-      check impl ta
-      acknowledge (Var (scope <> "." <> a) ta)
-    Expression x -> do
-      tx <- infer x
-      fresh \ø -> acknowledge (Var (scope <> "." <> ø) tx)
-    Pattern p -> do
-      tp <- infer p
-      fresh \ø -> acknowledge (Var (scope <> "." <> ø) tp)
