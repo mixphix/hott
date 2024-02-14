@@ -24,17 +24,19 @@ import Control.Monad.Except
 import Control.Monad.State
 import Data.Either
 import Data.Eq
+import Data.Foldable
 import Data.Function
 import Data.Functor
 import Data.Functor.Identity
 import Data.Maybe
 import Data.Ord
 import Data.Text (Text)
+import Data.Traversable
 import GHC.Show
 import Text.Parsec (ParseError, ParsecT)
 import Text.Parsec qualified as Parsec
 
-data Var i x = Var i x deriving (Eq, Ord, Show)
+data Var i x = Var i x deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
 
 class Misparse e where
   misparse :: ParseError -> e

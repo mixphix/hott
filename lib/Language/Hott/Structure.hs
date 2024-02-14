@@ -25,6 +25,7 @@ import Data.Either
 import Data.Eq
 import Data.Foldable
 import Data.Function
+import Data.Int
 import Data.Map (Map)
 import Data.Map.Strict (insert, (!?))
 import Data.Maybe
@@ -53,6 +54,8 @@ data E
   | NotASigmaType P
   | NotAPair P
   | NotANatural P
+  | NotAConstructor P
+  | ArgLengthMismatch P
   | MistypedConstructor P
   | Misparse ParseError
   deriving (Eq, Show)
@@ -77,7 +80,7 @@ data P
   | Proj (Var I P) (Var I P) (Var I (Var I P)) P
   | --
     Sum I [Var I [Var I P]]
-  | Ctor I I [Var I P] -- expressions
+  | Ctor I Int I [Var I P] -- expressions
   | Case I I [Either P (Var I P)] -- patterns
   | --
     Naturals
@@ -106,45 +109,46 @@ instance MonadInterpret I E N P M where
     put (N n.gamma (succ n.state))
     go ("_" <> fromString (show n.state))
 
-  repoint with this = fix \go -> \case
+  repoint with this = \case
     U u -> pure (U u)
     --
-    Point p -> pure if p == this then with else Point p
+    Point p -> pure if this == p then with else Point p
     --
     Func x ta tb
-      | x == this -> fresh \ø -> do
-          ta' <- repoint (Point ø) x ta
-          tb' <- repoint (Point ø) x tb
-          go (Func ø ta' tb')
+      | this == x ->
+          go =<< fresh \ø -> do
+            liftM2 (Func ø) (repoint (Point ø) x ta) (repoint (Point ø) x tb)
       | otherwise -> liftM2 (Func x) (go ta) (go tb)
     Lambda x ta b
-      | x == this -> fresh \ø -> do
-          ta' <- repoint (Point ø) x ta
-          b' <- repoint (Point ø) x b
-          go (Lambda ø ta' b')
+      | this == x ->
+          go =<< fresh \ø -> do
+            liftM2 (Func ø) (repoint (Point ø) x ta) (repoint (Point ø) x b)
       | otherwise -> liftM2 (Lambda x) (go ta) (go b)
     Apply p0 p1 -> liftM2 Apply (go p0) (go p1)
     --
     Sigma x ta tb
-      | x == this -> fresh \ø -> do
-          ta' <- repoint (Point ø) x ta
-          tb' <- repoint (Point ø) x tb
-          go (Func ø ta' tb')
+      | this == x ->
+          go =<< fresh \ø -> do
+            liftM2 (Func ø) (repoint (Point ø) x ta) (repoint (Point ø) x tb)
       | otherwise -> liftM2 (Sigma x) (go ta) (go tb)
     Pair a b -> liftM2 Pair (go a) (go b)
-    Proj sig@(Var p tp) c@(Var z tc) proj@(Var x (Var y g)) pair
-      | p == this -> fresh \ø -> do
-          to <- repoint (Point ø) p tp
-          go (Proj (Var ø to) c proj pair)
-      | z == this -> fresh \ø -> do
-          tc' <- repoint (Point ø) z tc
-          go (Proj sig (Var ø tc') proj pair)
-      | x == this -> fresh \ø -> do
-          g' <- repoint (Point ø) x g
-          go (Proj sig c (Var ø (Var y g')) pair)
-      | y == this -> fresh \ø -> do
-          g' <- repoint (Point ø) y g
-          go (Proj sig c (Var x (Var ø g')) pair)
+    Proj (Var p tp) (Var z tc) (Var x (Var y g)) pair
+      | this == p ->
+          go =<< fresh \ø -> do
+            tp' <- repoint (Point ø) p tp
+            pure (Proj (Var ø tp') (Var z tc) (Var x (Var y g)) pair)
+      | this == z ->
+          go =<< fresh \ø -> do
+            tc' <- repoint (Point ø) z tc
+            pure (Proj (Var p tp) (Var ø tc') (Var x (Var y g)) pair)
+      | this == x ->
+          go =<< fresh \ø -> do
+            g' <- repoint (Point ø) x g
+            pure (Proj (Var p tp) (Var z tc) (Var ø (Var y g')) pair)
+      | this == y ->
+          go =<< fresh \ø -> do
+            g' <- repoint (Point ø) y g
+            pure (Proj (Var p tp) (Var z tc) (Var x (Var ø g')) pair)
       | otherwise ->
           liftM4
             Proj
@@ -153,78 +157,76 @@ instance MonadInterpret I E N P M where
             (Var x . Var y <$> go g)
             (go pair)
     --
+    -- the type name `t` should be unique by construction,
+    -- so there should not be any conflicting `I` values
     Sum t ctors
-      | t == this -> fresh \ø ->
-          Sum ø <$> for ctors \case
-            Var ctor fields
-              | ctor == this -> fresh \_ø ->
-                  Var _ø <$> for fields \case
-                    Var f tf
-                      | f == this -> fresh \__ø -> Var __ø <$> go tf
-                      | otherwise -> Var f <$> go tf
-              | otherwise -> do
-                  Var ctor <$> for fields \case
-                    Var f tf
-                      | f == this -> fresh \_ø -> Var _ø <$> go tf
-                      | otherwise -> Var f <$> go tf
+      | this == t ->
+          go =<< fresh \ø -> do
+            Sum ø <$> for ctors do
+              traverse (traverse (traverse (repoint (Point ø) t)))
       | otherwise ->
-          Sum t <$> for ctors \case
-            Var ctor fields
-              | ctor == this -> fresh \ø ->
-                  Var ø <$> for fields \case
-                    Var f tf
-                      | f == this -> fresh \_ø -> Var _ø <$> go tf
-                      | otherwise -> Var f <$> go tf
-              | otherwise ->
-                  Var ctor <$> for fields \case
-                    Var f tf
-                      | f == this -> fresh \ø -> Var ø <$> go tf
-                      | otherwise -> Var f <$> go tf
-    Ctor t i fields
-      | i == this -> fresh \ø -> go (Ctor t ø fields)
-      | otherwise -> fresh \ø ->
-          Ctor t i <$> for fields \case
-            Var f tf
-              | f == this -> Var ø <$> go tf
-              | otherwise -> Var f <$> go tf
-    Case t ctor pats -> fresh \ø ->
-      Case t ctor <$> for pats \case
-        Left p -> Left <$> go p
-        Right (Var p tp)
-          | p == this -> Right . Var p <$> repoint (Point ø) p tp
-          | otherwise -> Right . Var p <$> go tp
+          Sum t <$> for ctors do
+            traverse (traverse (traverse go))
+    Ctor t ar i fields
+      | this == t ->
+          go =<< fresh \ø -> do
+            Ctor ø ar i <$> for fields do
+              traverse (repoint (Point ø) t)
+      | otherwise ->
+          Ctor t ar i <$> for fields do
+            traverse go
+    Case t ctor pats
+      | this == t ->
+          go =<< fresh \ø -> do
+            Case ø ctor <$> for pats do
+              traverse (traverse (repoint (Point ø) t))
+      | this == ctor ->
+          go =<< fresh \ø -> do
+            Case t ø <$> for pats do
+              traverse (traverse (repoint (Point ø) ctor))
+      | otherwise ->
+          Case t ctor <$> for pats do
+            traverse (traverse go)
+    --
     --
     Naturals -> pure Naturals
     Zero -> pure Zero
     Succ m -> pure (Succ m)
     Peano z tc c0 (Var x (Var y c1)) m
-      | z == this -> fresh \ø -> do
-          tc' <- repoint (Point ø) z tc
-          go (Peano ø tc' c0 (Var x (Var y c1)) m)
-      | x == this -> fresh \ø -> do
-          c1' <- repoint (Point ø) x c1
-          go (Peano z tc c0 (Var ø (Var y c1')) m)
-      | y == this -> fresh \ø -> do
-          c1' <- repoint (Point ø) y c1
-          go (Peano z tc c0 (Var x (Var ø c1')) m)
+      | this == z ->
+          go =<< fresh \ø -> do
+            tc' <- repoint (Point ø) z tc
+            pure (Peano ø tc' c0 (Var x (Var y c1)) m)
+      | this == x ->
+          go =<< fresh \ø -> do
+            c1' <- repoint (Point ø) x c1
+            pure (Peano z tc c0 (Var ø (Var y c1')) m)
+      | this == y ->
+          go =<< fresh \ø -> do
+            c1' <- repoint (Point ø) y c1
+            pure (Peano z tc c0 (Var x (Var ø c1')) m)
       | otherwise ->
           liftM4 (Peano z) (go tc) (go c0) (Var x . Var y <$> go c1) (go m)
     --
     Equality ta a b -> liftM3 Equality (go ta) (go a) (go b)
     Refl a -> Refl <$> go a
     Path ta (Var x (Var y (Var p tc))) (Var z c) a b path
-      | x == this -> fresh \ø -> do
-          tc' <- repoint (Point ø) x tc
-          go (Path ta (Var ø (Var y (Var p tc'))) (Var z c) a b path)
-      | y == this -> fresh \ø -> do
-          tc' <- repoint (Point ø) y tc
-          go (Path ta (Var x (Var ø (Var p tc'))) (Var z c) a b path)
-      | p == this -> fresh \ø -> do
-          tc' <- repoint (Point ø) x tc
-          go (Path ta (Var x (Var y (Var ø tc'))) (Var z c) a b path)
-      | z == this -> fresh \ø -> do
-          c' <- repoint (Point ø) z c
-          go (Path ta (Var x (Var y (Var p tc))) (Var ø c') a b path)
+      | this == x ->
+          go =<< fresh \ø -> do
+            tc' <- repoint (Point ø) x tc
+            pure (Path ta (Var ø (Var y (Var p tc'))) (Var z c) a b path)
+      | this == y ->
+          go =<< fresh \ø -> do
+            tc' <- repoint (Point ø) y tc
+            pure (Path ta (Var x (Var ø (Var p tc'))) (Var z c) a b path)
+      | this == p ->
+          go =<< fresh \ø -> do
+            tc' <- repoint (Point ø) x tc
+            pure (Path ta (Var x (Var y (Var ø tc'))) (Var z c) a b path)
+      | this == z ->
+          go =<< fresh \ø -> do
+            c' <- repoint (Point ø) z c
+            pure (Path ta (Var x (Var y (Var p tc))) (Var ø c') a b path)
       | otherwise ->
           liftM6
             Path
@@ -238,6 +240,7 @@ instance MonadInterpret I E N P M where
     FunExt f g -> liftM2 FunExt (go f) (go g)
     UA i ta tb -> liftM2 (UA i) (go ta) (go tb)
    where
+    go = repoint with this
     liftM6 z ma mb mc md me mf = do
       a <- ma
       b <- mb
@@ -287,17 +290,20 @@ instance MonadInterpret I E N P M where
     --
     Sum t ctors -> do
       ui <-
-        fmap Sg.getMax . fold <$> for ctors \(Var i args) -> do
-          u <- universe =<< infer (Ctor t i args)
+        fmap Sg.getMax . fold <$> ifor ctors \ar (Var i fields) -> do
+          u <- universe =<< infer (Ctor t ar i fields)
           pure (Just (Sg.Max u))
       u <- maybe (pure 0) universe =<< lookup t
       pure (U (fromMaybe u ui))
-    Ctor t i fields -> bind (lookup i) \case
-      Nothing -> throwError (UnknownIdentifier i)
-      Just π -> do
-        unless (π == Point t) $ throwError (MistypedConstructor π)
-        traverse_ acknowledge fields
-        pure (Point t)
+    Ctor t ar i fields -> do
+      let !lf = length fields
+      when (ar /= lf) $ throwError (NotAConstructor point)
+      bind (lookup i) \case
+        Nothing -> throwError (UnknownIdentifier i)
+        Just π -> do
+          unless (π == Point t) $ throwError (MistypedConstructor π)
+          traverse_ acknowledge fields
+          pure (Point t)
     Case t ctor pats -> bind (lookup ctor) \case
       Nothing -> throwError (UnknownIdentifier ctor)
       Just π -> do
