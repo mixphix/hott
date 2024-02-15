@@ -27,7 +27,7 @@ import Data.Foldable
 import Data.Function
 import Data.Int
 import Data.Map (Map)
-import Data.Map.Strict (insert, (!?))
+import Data.Map.Strict (insert, lookup)
 import Data.Maybe
 import Data.Ord
 import Data.Semigroup (Semigroup ((<>)))
@@ -37,7 +37,6 @@ import Data.Text (Text)
 import GHC.Enum
 import GHC.Show
 import Numeric.Natural (Natural)
-import Text.Parsec (ParseError)
 
 -- | Identifier
 newtype I = I Text deriving newtype (IsString, Eq, Ord, Semigroup, Show)
@@ -45,9 +44,9 @@ newtype I = I Text deriving newtype (IsString, Eq, Ord, Semigroup, Show)
 -- | Error
 data E
   = Crash
+  | SyntaxError P P
   | UnknownIdentifier I
   | AlreadyBound I P
-  | Unequal P P
   | UniverseMismatch P Natural P Natural
   | NotAType P P
   | NotAFunction P
@@ -57,10 +56,7 @@ data E
   | NotAConstructor P
   | ArgLengthMismatch P
   | MistypedConstructor P
-  | Misparse ParseError
   deriving (Eq, Show)
-
-instance Misparse E where misparse = Misparse
 
 -- | eNvironment
 data N = N {gamma :: Map I P, state :: Natural} deriving (Eq, Ord, Show)
@@ -100,15 +96,27 @@ data P
 newtype M x = M (Interpret I E N P x)
   deriving newtype (Functor, Applicative, Monad, MonadError E, MonadState N)
 
-runM :: M x -> N -> Text -> (Either E x, N)
+runM :: M x -> N -> (Either E x, N)
 runM (M t) = runInterpret t
 
+instance SyntaxError E P where syntaxError = SyntaxError
+
 instance MonadInterpret I E N P M where
+  recall :: I -> M (Maybe P)
+  recall i = gets (lookup i . gamma)
+
+  assume :: I -> P -> M ()
+  assume i p = bind (recall i) \case
+    Nothing -> modify \n -> n{gamma = insert i p n.gamma}
+    Just ip -> throwError (AlreadyBound i ip)
+
+  fresh :: (I -> M x) -> M x
   fresh go = do
     n <- get
     put (N n.gamma (succ n.state))
     go ("_" <> fromString (show n.state))
 
+  repoint :: P -> I -> (P -> M P)
   repoint with this = \case
     U u -> pure (U u)
     --
@@ -254,37 +262,32 @@ instance MonadInterpret I E N P M where
       f <- mf
       pure (z a b c d e f)
 
-  lookup this = get <&> \n -> n.gamma !? this
-
-  acknowledge (Var x tx) = bind (lookup x) \case
-    Nothing -> modify \n -> n{gamma = insert x tx n.gamma}
-    Just p -> throwError (AlreadyBound x p)
-
+  infer :: P -> M P
   infer point = case point of
     U u -> pure (U (succ u))
     --
-    Point i -> maybe (throwError (UnknownIdentifier i)) pure =<< lookup i
+    Point i -> maybe (throwError (UnknownIdentifier i)) pure =<< recall i
     --
     Func _ ta tb -> U <$> sameUniverse ta tb
     Lambda x ta b -> do
       typ ta
-      tb <- localVar (Var x ta) $ infer b
+      tb <- suppose x ta (infer b)
       pure (Func x ta tb)
     Apply (Lambda x ta b) a -> do
       a √ ta
-      localVar (Var x ta) $ repoint a x =<< infer b
+      suppose x ta (repoint a x =<< infer b)
     Apply f _ -> throwError (NotAFunction f)
     --
     Sigma _ ta tb -> U <$> sameUniverse ta tb
     Pair a b -> do
       ta <- infer a
-      fresh \__ -> localVar (Var __ ta) do
+      fresh \__ -> suppose __ ta do
         tb <- infer =<< repoint a __ b
         pure (Sigma __ ta tb)
     Proj (Var _ (Sigma q ta tb)) (Var z tc) (Var x (Var y g)) (Pair a b) -> do
       Pair a b √ Sigma q ta tb
-      localVar (Var z (Sigma q ta tb)) $ typ tc
-      localVar (Var x ta) $ localVar (Var y tb) do
+      suppose z (Sigma q ta tb) (typ tc)
+      suppose x ta $ suppose y tb do
         c' <- repoint (Pair a b) z tc
         g' <- (repoint a x >=> repoint b y) g
         g' √ c'
@@ -297,16 +300,16 @@ instance MonadInterpret I E N P M where
         fmap Sg.getMax . fold <$> ifor ctors \ar (Var i fields) -> do
           u <- universe =<< infer (Ctor t ar i fields)
           pure (Just (Sg.Max u))
-      u <- maybe (pure 0) universe =<< lookup t
+      u <- maybe (pure 0) universe =<< recall t
       pure (U (fromMaybe u ui))
     Ctor t ar ctor fields -> do
       when (ar /= length fields) $ throwError (NotAConstructor point)
-      bind (lookup ctor) \case
+      bind (recall ctor) \case
         Nothing -> throwError (UnknownIdentifier ctor)
         Just π -> do
           unless (π == Point t) $ throwError (MistypedConstructor π)
           pure (Point t)
-    Case t ctor pats -> bind (lookup ctor) \case
+    Case t ctor pats -> bind (recall ctor) \case
       Nothing -> throwError (UnknownIdentifier ctor)
       Just π -> do
         unless (π == Point t) $ throwError (MistypedConstructor π)
@@ -321,7 +324,7 @@ instance MonadInterpret I E N P M where
     Zero -> pure Naturals
     Succ m -> m √ Naturals >> pure Naturals
     Peano z tc c0 (Var x (Var y c1)) nat -> do
-      localVar (Var z Naturals) $ typ tc
+      suppose z Naturals $ typ tc
       case nat of
         Zero -> do
           tc' <- repoint Zero x tc
@@ -329,7 +332,7 @@ instance MonadInterpret I E N P M where
           pure tc'
         Succ m -> do
           tc' <- repoint (Succ m) z tc
-          localVar (Var x Naturals) $ localVar (Var y tc') do
+          suppose x Naturals $ suppose y tc' do
             c1' <- repoint (Succ m) x c1
             c1' √ tc'
             pure tc'
@@ -352,16 +355,13 @@ instance MonadInterpret I E N P M where
             >=> repoint (Refl (Point z)) p
           )
           tc
-      localVar (Var z ta) (c √ tc')
+      suppose z ta (c √ tc')
       pure tc'
     --
     FunExt _f _g -> throwError Crash
     UA _i _ta _tb -> throwError Crash
 
-  a √ t = do
-    ta <- infer a
-    unless (t == ta) (throwError (Unequal t ta))
-
+  compute :: P -> M P
   compute point = case point of
     Apply (Lambda x ta b) a -> do
       a √ ta
@@ -370,8 +370,8 @@ instance MonadInterpret I E N P M where
     --
     Proj (Var _ (Sigma q ta tb)) (Var z tc) (Var x (Var y g)) (Pair a b) -> do
       Pair a b √ Sigma q ta tb
-      localVar (Var z (Sigma q ta tb)) $ typ tc
-      localVar (Var x ta) $ localVar (Var y tb) do
+      suppose z (Sigma q ta tb) $ typ tc
+      suppose x ta $ suppose y tb do
         c' <- repoint (Pair a b) z tc
         g' <- (repoint a x >=> repoint b y) g
         g' √ c'
@@ -380,23 +380,23 @@ instance MonadInterpret I E N P M where
     Proj (Var _ tp) _ _ _ -> throwError (NotASigmaType tp)
     --
     Peano z tc c0 (Var x (Var y c1)) nat -> do
-      localVar (Var z Naturals) $ typ tc
+      suppose z Naturals $ typ tc
       case nat of
         Zero -> compute c0
         Succ m -> do
           tc' <- repoint (Succ m) z tc
-          localVar (Var x Naturals) $ localVar (Var y tc') do
+          suppose x Naturals $ suppose y tc' do
             c1' <- repoint (Succ m) x c1
             c1' √ tc'
             compute c1'
         _ -> throwError (NotANatural nat)
     Ctor t ar ctor fields -> do
       when (ar /= length fields) (throwError (NotAConstructor point))
-      bind (lookup ctor) \case
+      bind (recall ctor) \case
         Nothing -> throwError (UnknownIdentifier ctor)
         Just π -> do
           unless (π == Point t) (throwError (MistypedConstructor π))
-          foldr localVar (pure (Point t)) fields
+          foldr (var suppose) (pure (Point t)) fields
     p -> pure p
 
 typ :: P -> M ()
