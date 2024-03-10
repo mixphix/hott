@@ -25,13 +25,11 @@ import Data.Either
 import Data.Eq
 import Data.Foldable
 import Data.Function
-import Data.Int
 import Data.Map (Map)
 import Data.Map.Strict (insert, lookup)
 import Data.Maybe
 import Data.Ord
 import Data.Semigroup (Semigroup ((<>)))
-import Data.Semigroup qualified as Sg
 import Data.String
 import Data.Text (Text)
 import GHC.Enum
@@ -53,9 +51,6 @@ data E
   | NotASigmaType P
   | NotAPair P
   | NotANatural P
-  | NotAConstructor P
-  | ArgLengthMismatch P
-  | MistypedConstructor P
   deriving (Eq, Show)
 
 -- | eNvironment
@@ -64,31 +59,22 @@ data N = N {gamma :: Map I P, state :: Natural} deriving (Eq, Ord, Show)
 -- | Point
 data P
   = U Natural
-  | --
-    Point I
-  | --
-    Func I P P
+  | Point I
+  | Func I P P
   | Lambda I P P
   | Apply P P
-  | --
-    Sigma I P P
+  | Sigma I P P
   | Pair P P
   | Proj (Var I P) (Var I P) (Var I (Var I P)) P
-  | --
-    Sum I [Var I [Var I P]]
-  | Ctor I Int I [Var I P] -- expressions
-  | Case I I [Either P (Var I P)] -- patterns
-  | --
-    Naturals
+
+  | Naturals
   | Zero
   | Succ P
   | Peano I P P (Var I (Var I P)) P
-  | --
-    Equality P P P
+  | Equality P P P
   | Refl P
   | Path P (Var I (Var I (Var I P))) (Var I P) P P P
-  | --
-    FunExt P P
+  | FunExt P P
   | UA Natural P P
   deriving (Eq, Ord, Show)
 
@@ -164,42 +150,6 @@ instance MonadInterpret I E N P M where
             (Var z <$> go tc)
             (Var x . Var y <$> go g)
             (go pair)
-    --
-    -- the type name `t` should be unique by construction,
-    -- so there should not be any conflicting `I` values
-    Sum t ctors
-      | this == t ->
-          go =<< fresh \__ -> do
-            Sum __ <$> for ctors do
-              traverse (traverse (traverse (repoint (Point __) t)))
-      | otherwise ->
-          Sum t <$> for ctors do
-            traverse (traverse (traverse go))
-    Ctor t ar ctor fields
-      | this == t ->
-          go =<< fresh \__ -> do
-            Ctor __ ar ctor <$> for fields do
-              traverse (repoint (Point __) t)
-      | this == ctor ->
-          go =<< fresh \__ -> do
-            Ctor t ar __ <$> for fields do
-              traverse go
-      | otherwise ->
-          Ctor t ar ctor <$> for fields do
-            traverse go
-    Case t ctor pats
-      | this == t ->
-          go =<< fresh \__ -> do
-            Case __ ctor <$> for pats do
-              traverse (traverse (repoint (Point __) t))
-      | this == ctor ->
-          go =<< fresh \__ -> do
-            Case t __ <$> for pats do
-              traverse (traverse (repoint (Point __) ctor))
-      | otherwise ->
-          Case t ctor <$> for pats do
-            traverse (traverse go)
-    --
     --
     Naturals -> pure Naturals
     Zero -> pure Zero
@@ -295,31 +245,6 @@ instance MonadInterpret I E N P M where
     Proj (Var _ (Sigma _ _ _)) _ _ p -> throwError (NotAPair p)
     Proj (Var _ tp) _ _ _ -> throwError (NotASigmaType tp)
     --
-    Sum t ctors -> do
-      ui <-
-        fmap Sg.getMax . fold <$> ifor ctors \ar (Var i fields) -> do
-          u <- universe =<< infer (Ctor t ar i fields)
-          pure (Just (Sg.Max u))
-      u <- maybe (pure 0) universe =<< recall t
-      pure (U (fromMaybe u ui))
-    Ctor t ar ctor fields -> do
-      when (ar /= length fields) $ throwError (NotAConstructor point)
-      bind (recall ctor) \case
-        Nothing -> throwError (UnknownIdentifier ctor)
-        Just π -> do
-          unless (π == Point t) $ throwError (MistypedConstructor π)
-          pure (Point t)
-    Case t ctor pats -> bind (recall ctor) \case
-      Nothing -> throwError (UnknownIdentifier ctor)
-      Just π -> do
-        unless (π == Point t) $ throwError (MistypedConstructor π)
-        let applied = (=<<) . (compute .) . flip Apply
-        p <- reduceR (pure π) pats \case
-          Left p -> applied p
-          Right (Var _ p) -> applied p
-        p √ Point t
-        pure (Point t)
-    --
     Naturals -> pure (U 0)
     Zero -> pure Naturals
     Succ m -> m √ Naturals >> pure Naturals
@@ -390,13 +315,6 @@ instance MonadInterpret I E N P M where
             c1' √ tc'
             compute c1'
         _ -> throwError (NotANatural nat)
-    Ctor t ar ctor fields -> do
-      when (ar /= length fields) (throwError (NotAConstructor point))
-      bind (recall ctor) \case
-        Nothing -> throwError (UnknownIdentifier ctor)
-        Just π -> do
-          unless (π == Point t) (throwError (MistypedConstructor π))
-          foldr (var suppose) (pure (Point t)) fields
     p -> pure p
 
 typ :: P -> M ()
