@@ -51,6 +51,7 @@ data E
   | NotASigmaType P
   | NotAPair P
   | NotANatural P
+  | NotAnInjection P
   deriving (Eq, Show)
 
 -- | eNvironment
@@ -66,7 +67,10 @@ data P
   | Sigma I P P
   | Pair P P
   | Proj (Var I P) (Var I P) (Var I (Var I P)) P
-
+  | Coproduct P P
+  | InL P
+  | InR P
+  | Match I P (Var I P) (Var I P) P
   | Naturals
   | Zero
   | Succ P
@@ -150,6 +154,31 @@ instance MonadInterpret I E N P M where
             (Var z <$> go tc)
             (Var x . Var y <$> go g)
             (go pair)
+    --
+    Coproduct ta tb -> liftM2 Coproduct (go ta) (go tb)
+    InL a -> InL <$> go a
+    InR b -> InR <$> go b
+    Match z tc (Var x c) (Var y d) e
+      | this == z ->
+          go =<< fresh \__ -> do
+            tc' <- repoint (Point __) z tc
+            pure (Match __ tc' (Var x c) (Var y d) e)
+      | this == x ->
+          go =<< fresh \__ -> do
+            c' <- repoint (Point __) x c
+            pure (Match z tc (Var __ c') (Var y d) e)
+      | this == y ->
+          go =<< fresh \__ -> do
+            d' <- repoint (Point __) y d
+            pure (Match z tc (Var x c) (Var __ d') e)
+      | otherwise ->
+          liftM5
+            Match
+            (pure z)
+            (go tc)
+            (Var x <$> go c)
+            (Var y <$> go d)
+            (go e)
     --
     Naturals -> pure Naturals
     Zero -> pure Zero
@@ -244,6 +273,24 @@ instance MonadInterpret I E N P M where
         pure c'
     Proj (Var _ (Sigma _ _ _)) _ _ p -> throwError (NotAPair p)
     Proj (Var _ tp) _ _ _ -> throwError (NotASigmaType tp)
+    --
+    Coproduct ta tb -> do
+      ua <- universe ta
+      ub <- universe tb
+      pure (U $ max ua ub)
+    InL a -> do
+      ta <- infer a
+      fresh \__ -> pure (Coproduct ta (Point __))
+    InR b -> do
+      tb <- infer b
+      fresh \__ -> pure (Coproduct (Point __) tb)
+    Match z tc (Var x c) (Var y d) e -> case e of
+      InL a -> do
+        -- i have to already know what A and B are here?
+        _
+      InR b -> do
+        _
+      _ -> throwError (NotAnInjection e)
     --
     Naturals -> pure (U 0)
     Zero -> pure Naturals
