@@ -23,7 +23,6 @@ import Control.Monad.State
 import Data.Bool
 import Data.Either
 import Data.Eq
-import Data.Foldable
 import Data.Function
 import Data.Map (Map)
 import Data.Map.Strict (insert, lookup)
@@ -238,8 +237,7 @@ instance MonadInterpret I E N P M where
       c <- mc
       d <- md
       e <- me
-      f <- mf
-      pure (z a b c d e f)
+      z a b c d e <$> mf
 
   infer :: P -> M P
   infer point = case point of
@@ -263,15 +261,15 @@ instance MonadInterpret I E N P M where
       fresh \__ -> suppose __ ta do
         tb <- infer =<< repoint a __ b
         pure (Sigma __ ta tb)
-    Proj (Var _ (Sigma q ta tb)) (Var z tc) (Var x (Var y g)) (Pair a b) -> do
-      Pair a b √ Sigma q ta tb
+    Proj (Var _ (Sigma q ta tb)) (Var z tc) (Var x (Var y g)) p@(Pair a b) -> do
+      p √ Sigma q ta tb
       suppose z (Sigma q ta tb) (typ tc)
       suppose x ta $ suppose y tb do
-        c' <- repoint (Pair a b) z tc
+        tc' <- repoint p z tc
         g' <- (repoint a x >=> repoint b y) g
-        g' √ c'
-        pure c'
-    Proj (Var _ (Sigma _ _ _)) _ _ p -> throwError (NotAPair p)
+        g' √ tc'
+        pure tc'
+    Proj (Var _ Sigma{}) _ _ p -> throwError (NotAPair p)
     Proj (Var _ tp) _ _ _ -> throwError (NotASigmaType tp)
     --
     Coproduct ta tb -> do
@@ -280,16 +278,27 @@ instance MonadInterpret I E N P M where
       pure (U $ max ua ub)
     InL a -> do
       ta <- infer a
-      fresh \__ -> pure (Coproduct ta (Point __))
+      fresh $ pure . Coproduct ta . Point
     InR b -> do
       tb <- infer b
       fresh \__ -> pure (Coproduct (Point __) tb)
     Match z tc (Var x c) (Var y d) e -> case e of
       InL a -> do
-        -- i have to already know what A and B are here?
-        _
+        ta <- infer a
+        fresh \__ -> suppose z (Coproduct ta (Point __)) (typ tc)
+        suppose x ta do
+          tc' <- repoint e x tc
+          c' <- repoint a x c
+          c' √ tc'
+          pure tc'
       InR b -> do
-        _
+        tb <- infer b
+        fresh \__ -> suppose z (Coproduct (Point __) tb) (typ tc)
+        suppose y tb do
+          tc' <- repoint e y tc
+          d' <- repoint b y d
+          d' √ tc'
+          pure tc'
       _ -> throwError (NotAnInjection e)
     --
     Naturals -> pure (U 0)
@@ -348,7 +357,7 @@ instance MonadInterpret I E N P M where
         g' <- (repoint a x >=> repoint b y) g
         g' √ c'
         compute g'
-    Proj (Var _ (Sigma _ _ _)) _ _ p -> throwError (NotAPair p)
+    Proj (Var _ Sigma{}) _ _ p -> throwError (NotAPair p)
     Proj (Var _ tp) _ _ _ -> throwError (NotASigmaType tp)
     --
     Peano z tc c0 (Var x (Var y c1)) nat -> do
