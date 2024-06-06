@@ -5,6 +5,7 @@ module Language.Hott.Structure
   , P (..)
   , M (..)
   , runM
+  , n0
   , typ
   , universe
   , sameUniverse
@@ -27,6 +28,7 @@ import Data.Function
 import Data.Map (Map)
 import Data.Map.Strict (insert, lookup)
 import Data.Maybe
+import Data.Monoid (mempty)
 import Data.Ord
 import Data.Semigroup (Semigroup ((<>)))
 import Data.String
@@ -55,6 +57,9 @@ data E
 
 -- | eNvironment
 data N = N {gamma :: Map I P, state :: Natural} deriving (Eq, Ord, Show)
+
+n0 :: N
+n0 = N mempty 0
 
 -- | Point
 data P
@@ -252,7 +257,7 @@ instance MonadInterpret I E N P M where
       pure (Func x ta tb)
     Apply (Lambda x ta b) a -> do
       a √ ta
-      suppose x ta (repoint a x =<< infer b)
+      suppose x ta $ repoint a x b
     Apply f _ -> throwError (NotAFunction f)
     --
     Sigma _ ta tb -> U <$> sameUniverse ta tb
