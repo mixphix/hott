@@ -99,8 +99,8 @@ instance MonadInterpret I E N P M where
   recall :: I -> M (Maybe P)
   recall i = gets (lookup i . gamma)
 
-  assume :: I -> P -> M ()
-  assume i p = bind (recall i) \case
+  assume :: Var I P -> M ()
+  assume (Var i p) = bind (recall i) \case
     Nothing -> modify \n -> n{gamma = insert i p n.gamma}
     Just ip -> throwError (AlreadyBound i ip)
 
@@ -253,23 +253,23 @@ instance MonadInterpret I E N P M where
     Func _ ta tb -> U <$> sameUniverse ta tb
     Lambda x ta b -> do
       typ ta
-      tb <- suppose x ta (infer b)
+      tb <- suppose (Var x ta) (infer b)
       pure (Func x ta tb)
     Apply (Lambda x ta b) a -> do
       a √ ta
-      suppose x ta $ repoint a x b
+      suppose (Var x ta) (repoint a x b)
     Apply f _ -> throwError (NotAFunction f)
     --
     Sigma _ ta tb -> U <$> sameUniverse ta tb
     Pair a b -> do
       ta <- infer a
-      fresh \__ -> suppose __ ta do
+      fresh \__ -> suppose (Var __ ta) do
         tb <- infer =<< repoint a __ b
         pure (Sigma __ ta tb)
     Proj (Var _ (Sigma q ta tb)) (Var z tc) (Var x (Var y g)) p@(Pair a b) -> do
       p √ Sigma q ta tb
-      suppose z (Sigma q ta tb) (typ tc)
-      suppose x ta $ suppose y tb do
+      suppose (Var z (Sigma q ta tb)) (typ tc)
+      suppose (Var x ta) $ suppose (Var y tb) do
         tc' <- repoint p z tc
         g' <- (repoint a x >=> repoint b y) g
         g' √ tc'
@@ -290,16 +290,16 @@ instance MonadInterpret I E N P M where
     Match z tc (Var x c) (Var y d) e -> case e of
       InL a -> do
         ta <- infer a
-        fresh \__ -> suppose z (Coproduct ta (Point __)) (typ tc)
-        suppose x ta do
+        fresh \__ -> suppose (Var z (Coproduct ta (Point __))) (typ tc)
+        suppose (Var x ta) do
           tc' <- repoint e x tc
           c' <- repoint a x c
           c' √ tc'
           pure tc'
       InR b -> do
         tb <- infer b
-        fresh \__ -> suppose z (Coproduct (Point __) tb) (typ tc)
-        suppose y tb do
+        fresh \__ -> suppose (Var z (Coproduct (Point __) tb)) (typ tc)
+        suppose (Var y tb) do
           tc' <- repoint e y tc
           d' <- repoint b y d
           d' √ tc'
@@ -310,7 +310,7 @@ instance MonadInterpret I E N P M where
     Zero -> pure Naturals
     Succ m -> m √ Naturals >> pure Naturals
     Peano z tc c0 (Var x (Var y c1)) nat -> do
-      suppose z Naturals $ typ tc
+      suppose (Var z Naturals) (typ tc)
       case nat of
         Zero -> do
           tc' <- repoint Zero x tc
@@ -318,7 +318,7 @@ instance MonadInterpret I E N P M where
           pure tc'
         Succ m -> do
           tc' <- repoint (Succ m) z tc
-          suppose x Naturals $ suppose y tc' do
+          suppose (Var x Naturals) $ suppose (Var y tc') do
             c1' <- repoint (Succ m) x c1
             c1' √ tc'
             pure tc'
@@ -341,7 +341,7 @@ instance MonadInterpret I E N P M where
             >=> repoint (Refl (Point z)) p
           )
           tc
-      suppose z ta (c √ tc')
+      suppose (Var z ta) (c √ tc')
       pure tc'
     --
     FunExt _f _g -> throwError Crash
@@ -356,8 +356,8 @@ instance MonadInterpret I E N P M where
     --
     Proj (Var _ (Sigma q ta tb)) (Var z tc) (Var x (Var y g)) (Pair a b) -> do
       Pair a b √ Sigma q ta tb
-      suppose z (Sigma q ta tb) $ typ tc
-      suppose x ta $ suppose y tb do
+      suppose (Var z (Sigma q ta tb)) (typ tc)
+      suppose (Var x ta) $ suppose (Var y tb) do
         c' <- repoint (Pair a b) z tc
         g' <- (repoint a x >=> repoint b y) g
         g' √ c'
@@ -366,12 +366,12 @@ instance MonadInterpret I E N P M where
     Proj (Var _ tp) _ _ _ -> throwError (NotASigmaType tp)
     --
     Peano z tc c0 (Var x (Var y c1)) nat -> do
-      suppose z Naturals $ typ tc
+      suppose (Var z Naturals) (typ tc)
       case nat of
         Zero -> compute c0
         Succ m -> do
           tc' <- repoint (Succ m) z tc
-          suppose x Naturals $ suppose y tc' do
+          suppose (Var x Naturals) $ suppose (Var y tc') do
             c1' <- repoint (Succ m) x c1
             c1' √ tc'
             compute c1'

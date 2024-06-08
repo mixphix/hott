@@ -49,7 +49,7 @@ class
     | m -> i e n p
   where
   recall :: i -> m (Maybe p)
-  assume :: i -> p -> m ()
+  assume :: Var i p -> m ()
 
   fresh :: (i -> m x) -> m x
   repoint :: p -> i -> (p -> m p)
@@ -65,10 +65,10 @@ locally new interpret = do
   x <- put new >> interpret
   put n
   pure x
-suppose :: (MonadInterpret i e n p m) => i -> p -> m x -> m x
-suppose i p interpret = do
+suppose :: (MonadInterpret i e n p m) => Var i p -> m x -> m x
+suppose v interpret = do
   n <- get
-  x <- assume i p >> interpret
+  x <- assume v >> interpret
   put n
   pure x
 
