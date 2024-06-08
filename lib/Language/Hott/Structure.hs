@@ -245,7 +245,7 @@ instance MonadInterpret I E N P M where
       z a b c d e <$> mf
 
   infer :: P -> M P
-  infer point = case point of
+  infer = \case
     U u -> pure (U (succ u))
     --
     Point i -> maybe (throwError (UnknownIdentifier i)) pure =<< recall i
@@ -348,7 +348,7 @@ instance MonadInterpret I E N P M where
     UA _i _ta _tb -> throwError Crash
 
   compute :: P -> M P
-  compute point = case point of
+  compute = \case
     Apply (Lambda x ta b) a -> do
       a √ ta
       compute =<< repoint a x b
