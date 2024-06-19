@@ -60,15 +60,15 @@ class
 (√) :: (MonadInterpret i e n p m) => p -> p -> m ()
 a √ t = infer a >>= \ta -> unless (t == ta) (throwError (syntaxError t ta))
 locally :: (MonadInterpret i e n p m) => n -> m x -> m x
-locally new interpret = do
+locally __ interpret = do
   n <- get
-  x <- put new >> interpret
+  x <- put __ >> interpret
   put n
   pure x
 suppose :: (MonadInterpret i e n p m) => Var i p -> m x -> m x
-suppose v interpret = do
+suppose __ interpret = do
   n <- get
-  x <- assume v >> interpret
+  x <- assume __ >> interpret
   put n
   pure x
 

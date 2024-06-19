@@ -55,6 +55,7 @@ data E
   | NotAPair P
   | NotANatural P
   | NotAnInjection P
+  | InjectionMismatch P P
   deriving (Eq, Show)
 
 -- | eNvironment
@@ -203,21 +204,21 @@ instance MonadInterpret I E N P M where
           rec =<< fresh \__ -> do
             Inj __ <$> repoint (Point __) i a
       | otherwise -> Inj i <$> rec a
-    Cases c tc ps e
-      | this == c ->
+    Cases z tc ps e
+      | this == z ->
           rec =<< fresh \__ -> do
-            tc' <- repoint (Point __) c tc
-            e' <- repoint (Point __) c e
+            tc' <- repoint (Point __) z tc
+            e' <- repoint (Point __) z e
             flip (Cases __ tc') e' <$> for ps \(Var v p) -> do
               Var v_ p_ <-
                 if this == v
                   then fresh \___ -> Var ___ <$> repoint (Point ___) v p
                   else pure (Var v p)
-              Var v_ <$> repoint (Point __) c p_
+              Var v_ <$> repoint (Point __) z p_
       | otherwise ->
           liftM4
             Cases
-            (pure c)
+            (pure z)
             (rec tc)
             ( for ps \(Var v p) -> do
                 Var v_ p_ <-
@@ -361,15 +362,25 @@ instance MonadInterpret I E N P M where
       pure case us of
         [] -> U 0
         xs -> U (List.maximum xs)
-    Inj i a -> do
-      ti <- recall i
-      case ti of
-        Just (Func _ tia tib) -> do
-          ta <- infer a
-          unless (tia == ta) $ throwError (TypeMismatch tia ta)
-          pure tib
-        _ -> throwError (UnknownIdentifier i)
-    Cases c tc ps e -> _
+    Inj i a -> bind (recall i) \case
+      Just (Func _ tia tib) -> do
+        ta <- infer a
+        unless (tia == ta) $ throwError (TypeMismatch tia ta)
+        pure tib
+      _ -> throwError (UnknownIdentifier i)
+    Cases z tc ps e -> case e of
+      Inj i a -> bind (infer e) \case
+        Sum vs -> case List.find (var \i_ _ -> i == i_) ps of
+          Nothing -> throwError (InjectionMismatch e (Sum vs))
+          Just (Var x c) -> do
+            suppose (Var z (Sum vs)) (typ tc)
+            suppose (Var x c) do
+              tc' <- repoint e x tc
+              c' <- repoint a x c
+              c' √ tc'
+              pure tc'
+        _ -> throwError Crash
+      _ -> throwError (NotAnInjection e)
     --
     Naturals -> pure (U 0)
     Zero -> pure Naturals
