@@ -70,18 +70,18 @@ data P
   | --
     Point I
   | --
-    Func I P P
+    Func (Var I P) P
   | Lambda I P P
   | Apply P P
   | --
-    Sigma I P P
+    Sigma (Var I P) P
   | Pair P P
   | Proj (Var I P) (Var I P) (Var I (Var I P)) P
   | --
     Coproduct P P
   | InL P
   | InR P
-  | Match I P (Var I P) (Var I P) P
+  | Match (Var I P) (Var I P) (Var I P) P
   | --
     Sum [Var I P]
   | Inj I P
@@ -90,7 +90,7 @@ data P
     Naturals
   | Zero
   | Succ P
-  | Peano I P P (Var I (Var I P)) P
+  | Peano (Var I P) P (Var I (Var I P)) P
   | --
     Equality P P P
   | Refl P
@@ -130,23 +130,23 @@ instance MonadInterpret I E N P M where
     --
     Point p -> pure if this == p then with else Point p
     --
-    Func x ta tb
+    Func (Var x ta) tb
       | this == x ->
           rec =<< fresh \__ -> do
-            liftM2 (Func __) (repoint (Point __) x ta) (repoint (Point __) x tb)
-      | otherwise -> liftM2 (Func x) (rec ta) (rec tb)
+            liftM2 (Func . Var __) (repoint (Point __) x ta) (repoint (Point __) x tb)
+      | otherwise -> liftM2 (Func . Var x) (rec ta) (rec tb)
     Lambda x ta b
       | this == x ->
           rec =<< fresh \__ -> do
-            liftM2 (Func __) (repoint (Point __) x ta) (repoint (Point __) x b)
+            liftM2 (Func . Var __) (repoint (Point __) x ta) (repoint (Point __) x b)
       | otherwise -> liftM2 (Lambda x) (rec ta) (rec b)
     Apply p0 p1 -> liftM2 Apply (rec p0) (rec p1)
     --
-    Sigma x ta tb
+    Sigma (Var x ta) tb
       | this == x ->
           rec =<< fresh \__ -> do
-            liftM2 (Func __) (repoint (Point __) x ta) (repoint (Point __) x tb)
-      | otherwise -> liftM2 (Sigma x) (rec ta) (rec tb)
+            liftM2 (Func . Var __) (repoint (Point __) x ta) (repoint (Point __) x tb)
+      | otherwise -> liftM2 (Sigma . Var x) (rec ta) (rec tb)
     Pair a b -> liftM2 Pair (rec a) (rec b)
     Proj (Var p tp) (Var z tc) (Var x (Var y g)) pair
       | this == p ->
@@ -176,24 +176,23 @@ instance MonadInterpret I E N P M where
     Coproduct ta tb -> liftM2 Coproduct (rec ta) (rec tb)
     InL a -> InL <$> rec a
     InR b -> InR <$> rec b
-    Match z tc (Var x c) (Var y d) e
+    Match (Var z tc) (Var x c) (Var y d) e
       | this == z ->
           rec =<< fresh \__ -> do
             tc' <- repoint (Point __) z tc
-            pure (Match __ tc' (Var x c) (Var y d) e)
+            pure (Match (Var __ tc') (Var x c) (Var y d) e)
       | this == x ->
           rec =<< fresh \__ -> do
             c' <- repoint (Point __) x c
-            pure (Match z tc (Var __ c') (Var y d) e)
+            pure (Match (Var z tc) (Var __ c') (Var y d) e)
       | this == y ->
           rec =<< fresh \__ -> do
             d' <- repoint (Point __) y d
-            pure (Match z tc (Var x c) (Var __ d') e)
+            pure (Match (Var z tc) (Var x c) (Var __ d') e)
       | otherwise ->
-          liftM5
+          liftM4
             Match
-            (pure z)
-            (rec tc)
+            (Var z <$> rec tc)
             (Var x <$> rec c)
             (Var y <$> rec d)
             (rec e)
@@ -232,21 +231,26 @@ instance MonadInterpret I E N P M where
     Naturals -> pure Naturals
     Zero -> pure Zero
     Succ m -> pure (Succ m)
-    Peano z tc c0 (Var x (Var y c1)) m
+    Peano (Var z tc) c0 (Var x (Var y c1)) m
       | this == z ->
           rec =<< fresh \__ -> do
             tc' <- repoint (Point __) z tc
-            pure (Peano __ tc' c0 (Var x (Var y c1)) m)
+            pure (Peano (Var __ tc') c0 (Var x (Var y c1)) m)
       | this == x ->
           rec =<< fresh \__ -> do
             c1' <- repoint (Point __) x c1
-            pure (Peano z tc c0 (Var __ (Var y c1')) m)
+            pure (Peano (Var z tc) c0 (Var __ (Var y c1')) m)
       | this == y ->
           rec =<< fresh \__ -> do
             c1' <- repoint (Point __) y c1
-            pure (Peano z tc c0 (Var x (Var __ c1')) m)
+            pure (Peano (Var z tc) c0 (Var x (Var __ c1')) m)
       | otherwise ->
-          liftM4 (Peano z) (rec tc) (rec c0) (Var x . Var y <$> rec c1) (rec m)
+          liftM4
+            Peano
+            (Var z <$> rec tc)
+            (rec c0)
+            (Var x . Var y <$> rec c1)
+            (rec m)
     --
     Equality ta a b -> liftM3 Equality (rec ta) (rec a) (rec b)
     Refl a -> Refl <$> rec a
@@ -299,25 +303,25 @@ instance MonadInterpret I E N P M where
     --
     Point i -> maybe (throwError (UnknownIdentifier i)) pure =<< recall i
     --
-    Func _ ta tb -> U <$> sameUniverse ta tb
+    Func (Var _ ta) tb -> U <$> sameUniverse ta tb
     Lambda x ta b -> do
       typ ta
       tb <- suppose (Var x ta) (infer b)
-      pure (Func x ta tb)
+      pure (Func (Var x ta) tb)
     Apply (Lambda x ta b) a -> do
       a √ ta
       suppose (Var x ta) (repoint a x b)
     Apply f _ -> throwError (NotAFunction f)
     --
-    Sigma _ ta tb -> U <$> sameUniverse ta tb
+    Sigma (Var _ ta) tb -> U <$> sameUniverse ta tb
     Pair a b -> do
       ta <- infer a
       fresh \__ -> suppose (Var __ ta) do
         tb <- infer =<< repoint a __ b
-        pure (Sigma __ ta tb)
-    Proj (Var _ (Sigma q ta tb)) (Var z tc) (Var x (Var y g)) p@(Pair a b) -> do
-      p √ Sigma q ta tb
-      suppose (Var z (Sigma q ta tb)) (typ tc)
+        pure (Sigma (Var __ ta) tb)
+    Proj (Var _ (Sigma (Var q ta) tb)) (Var z tc) (Var x (Var y g)) p@(Pair a b) -> do
+      p √ Sigma (Var q ta) tb
+      suppose (Var z (Sigma (Var q ta) tb)) (typ tc)
       suppose (Var x ta) $ suppose (Var y tb) do
         tc' <- repoint p z tc
         g' <- (repoint a x >=> repoint b y) g
@@ -336,7 +340,7 @@ instance MonadInterpret I E N P M where
     InR b -> do
       tb <- infer b
       fresh \__ -> pure (Coproduct (Point __) tb)
-    Match z tc (Var x c) (Var y d) e -> case e of
+    Match (Var z tc) (Var x c) (Var y d) e -> case e of
       InL a -> do
         ta <- infer a
         fresh \__ -> suppose (Var z (Coproduct ta (Point __))) (typ tc)
@@ -357,13 +361,13 @@ instance MonadInterpret I E N P M where
     --
     Sum vs -> do
       us <- for vs \(Var i a) -> fresh \__ -> do
-        assume (Var i (Func __ a (Sum vs)))
+        assume (Var i (Func (Var __ a) (Sum vs)))
         universe a
       pure case us of
         [] -> U 0
         xs -> U (List.maximum xs)
     Inj i a -> bind (recall i) \case
-      Just (Func _ tia tib) -> do
+      Just (Func (Var _ tia) tib) -> do
         ta <- infer a
         unless (tia == ta) $ throwError (TypeMismatch tia ta)
         pure tib
@@ -385,7 +389,7 @@ instance MonadInterpret I E N P M where
     Naturals -> pure (U 0)
     Zero -> pure Naturals
     Succ m -> m √ Naturals >> pure Naturals
-    Peano z tc c0 (Var x (Var y c1)) nat -> do
+    Peano (Var z tc) c0 (Var x (Var y c1)) nat -> do
       suppose (Var z Naturals) (typ tc)
       case nat of
         Zero -> do
@@ -430,9 +434,9 @@ instance MonadInterpret I E N P M where
       compute =<< repoint a x b
     Apply f _ -> throwError (NotAFunction f)
     --
-    Proj (Var _ (Sigma q ta tb)) (Var z tc) (Var x (Var y g)) (Pair a b) -> do
-      Pair a b √ Sigma q ta tb
-      suppose (Var z (Sigma q ta tb)) (typ tc)
+    Proj (Var _ s@(Sigma (Var _ ta) tb)) (Var z tc) (Var x (Var y g)) (Pair a b) -> do
+      suppose (Var z s) (typ tc)
+      Pair a b √ s
       suppose (Var x ta) $ suppose (Var y tb) do
         c' <- repoint (Pair a b) z tc
         g' <- (repoint a x >=> repoint b y) g
@@ -441,7 +445,8 @@ instance MonadInterpret I E N P M where
     Proj (Var _ Sigma{}) _ _ p -> throwError (NotAPair p)
     Proj (Var _ tp) _ _ _ -> throwError (NotASigmaType tp)
     --
-    Match z tc (Var x c) (Var y d) e -> case e of
+    Match (Var z tc) (Var x c) (Var y d) e -> do
+     case e of
       InL a -> do
         ta <- infer a
         suppose (Var x ta) do
@@ -458,7 +463,7 @@ instance MonadInterpret I E N P M where
           compute d'
       _ -> throwError (NotAnInjection e)
     --
-    Peano z tc c0 (Var x (Var y c1)) nat -> do
+    Peano (Var z tc) c0 (Var x (Var y c1)) nat -> do
       suppose (Var z Naturals) (typ tc)
       case nat of
         Zero -> compute c0
@@ -489,10 +494,10 @@ sameUniverse p0 p1 = do
   pure u0
 
 (-->) :: P -> P -> M P
-ta --> tb = sameUniverse ta tb >> fresh \__ -> pure (Func __ ta tb)
+ta --> tb = sameUniverse ta tb >> fresh \__ -> pure (Func (Var __ ta) tb)
 
 (**) :: P -> P -> M P
-ta ** tb = sameUniverse ta tb >> fresh \__ -> pure (Sigma __ ta tb)
+ta ** tb = sameUniverse ta tb >> fresh \__ -> pure (Sigma (Var __ ta) tb)
 
 -- negate :: P -> M P
 -- negate tx = typ tx >> fresh \x -> pure (Func x tx Bottom)
