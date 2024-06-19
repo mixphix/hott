@@ -71,7 +71,7 @@ data P
     Point I
   | --
     Func (Var I P) P
-  | Lambda I P P
+  | Lambda (Var I P) P
   | Apply P P
   | --
     Sigma (Var I P) P
@@ -131,40 +131,42 @@ instance MonadInterpret I E N P M where
     Point p -> pure if this == p then with else Point p
     --
     Func (Var x ta) tb
-      | this == x ->
-          rec =<< fresh \__ -> do
-            liftM2 (Func . Var __) (repoint (Point __) x ta) (repoint (Point __) x tb)
+      | this == x -> fresh \__ ->
+          rec =<< liftM2
+            do Func . Var __
+            do repoint (Point __) x ta
+            do repoint (Point __) x tb
       | otherwise -> liftM2 (Func . Var x) (rec ta) (rec tb)
-    Lambda x ta b
-      | this == x ->
-          rec =<< fresh \__ -> do
-            liftM2 (Func . Var __) (repoint (Point __) x ta) (repoint (Point __) x b)
-      | otherwise -> liftM2 (Lambda x) (rec ta) (rec b)
+    Lambda (Var x ta) b
+      | this == x -> fresh \__ ->
+          rec =<< liftM2
+            do Lambda . Var __
+            do repoint (Point __) x ta
+            do repoint (Point __) x b
+      | otherwise -> liftM2 (Lambda . Var x) (rec ta) (rec b)
     Apply p0 p1 -> liftM2 Apply (rec p0) (rec p1)
     --
     Sigma (Var x ta) tb
-      | this == x ->
-          rec =<< fresh \__ -> do
-            liftM2 (Func . Var __) (repoint (Point __) x ta) (repoint (Point __) x tb)
+      | this == x -> fresh \__ ->
+          rec =<< liftM2
+            do Sigma . Var __
+            do repoint (Point __) x ta
+            do repoint (Point __) x tb
       | otherwise -> liftM2 (Sigma . Var x) (rec ta) (rec tb)
     Pair a b -> liftM2 Pair (rec a) (rec b)
     Proj (Var p tp) (Var z tc) (Var x (Var y g)) pair
-      | this == p ->
-          rec =<< fresh \__ -> do
-            tp' <- repoint (Point __) p tp
-            pure (Proj (Var __ tp') (Var z tc) (Var x (Var y g)) pair)
-      | this == z ->
-          rec =<< fresh \__ -> do
-            tc' <- repoint (Point __) z tc
-            pure (Proj (Var p tp) (Var __ tc') (Var x (Var y g)) pair)
-      | this == x ->
-          rec =<< fresh \__ -> do
-            g' <- repoint (Point __) x g
-            pure (Proj (Var p tp) (Var z tc) (Var __ (Var y g')) pair)
-      | this == y ->
-          rec =<< fresh \__ -> do
-            g' <- repoint (Point __) y g
-            pure (Proj (Var p tp) (Var z tc) (Var x (Var __ g')) pair)
+      | this == p -> fresh \__ -> do
+          tp' <- repoint (Point __) p tp
+          rec $ Proj (Var __ tp') (Var z tc) (Var x (Var y g)) pair
+      | this == z -> fresh \__ -> do
+          tc' <- repoint (Point __) z tc
+          rec $ Proj (Var p tp) (Var __ tc') (Var x (Var y g)) pair
+      | this == x -> fresh \__ -> do
+          g' <- repoint (Point __) x g
+          rec $ Proj (Var p tp) (Var z tc) (Var __ (Var y g')) pair
+      | this == y -> fresh \__ -> do
+          g' <- repoint (Point __) y g
+          rec $ Proj (Var p tp) (Var z tc) (Var x (Var __ g')) pair
       | otherwise ->
           liftM4
             Proj
@@ -177,18 +179,15 @@ instance MonadInterpret I E N P M where
     InL a -> InL <$> rec a
     InR b -> InR <$> rec b
     Match (Var z tc) (Var x c) (Var y d) e
-      | this == z ->
-          rec =<< fresh \__ -> do
-            tc' <- repoint (Point __) z tc
-            pure (Match (Var __ tc') (Var x c) (Var y d) e)
-      | this == x ->
-          rec =<< fresh \__ -> do
-            c' <- repoint (Point __) x c
-            pure (Match (Var z tc) (Var __ c') (Var y d) e)
-      | this == y ->
-          rec =<< fresh \__ -> do
-            d' <- repoint (Point __) y d
-            pure (Match (Var z tc) (Var x c) (Var __ d') e)
+      | this == z -> fresh \__ -> do
+          tc' <- repoint (Point __) z tc
+          rec $ Match (Var __ tc') (Var x c) (Var y d) e
+      | this == x -> fresh \__ -> do
+          c' <- repoint (Point __) x c
+          rec $ Match (Var z tc) (Var __ c') (Var y d) e
+      | this == y -> fresh \__ -> do
+          d' <- repoint (Point __) y d
+          rec $ Match (Var z tc) (Var x c) (Var __ d') e
       | otherwise ->
           liftM4
             Match
@@ -199,51 +198,35 @@ instance MonadInterpret I E N P M where
     --
     Sum vs -> Sum <$> traverse recV vs
     Inj i a
-      | this == i ->
-          rec =<< fresh \__ -> do
-            Inj __ <$> repoint (Point __) i a
+      | this == i -> fresh \__ -> do
+          rec . Inj __ =<< repoint (Point __) i a
       | otherwise -> Inj i <$> rec a
     Cases z tc ps e
-      | this == z ->
-          rec =<< fresh \__ -> do
-            tc' <- repoint (Point __) z tc
-            e' <- repoint (Point __) z e
-            flip (Cases __ tc') e' <$> for ps \(Var v p) -> do
-              Var v_ p_ <-
-                if this == v
-                  then fresh \___ -> Var ___ <$> repoint (Point ___) v p
-                  else pure (Var v p)
-              Var v_ <$> repoint (Point __) z p_
+      | this == z -> fresh \__ -> do
+          tc' <- repoint (Point __) z tc
+          ps' <- traverse recV ps
+          rec . Cases __ tc' ps' =<< repoint (Point __) z e
       | otherwise ->
           liftM4
             Cases
             (pure z)
             (rec tc)
-            ( for ps \(Var v p) -> do
-                Var v_ p_ <-
-                  if this == v
-                    then fresh \__ -> Var __ <$> repoint (Point __) v p
-                    else pure (Var v p)
-                Var v_ <$> rec p_
-            )
+            (traverse recV ps)
             (rec e)
     --
     Naturals -> pure Naturals
     Zero -> pure Zero
     Succ m -> pure (Succ m)
     Peano (Var z tc) c0 (Var x (Var y c1)) m
-      | this == z ->
-          rec =<< fresh \__ -> do
-            tc' <- repoint (Point __) z tc
-            pure (Peano (Var __ tc') c0 (Var x (Var y c1)) m)
-      | this == x ->
-          rec =<< fresh \__ -> do
-            c1' <- repoint (Point __) x c1
-            pure (Peano (Var z tc) c0 (Var __ (Var y c1')) m)
-      | this == y ->
-          rec =<< fresh \__ -> do
-            c1' <- repoint (Point __) y c1
-            pure (Peano (Var z tc) c0 (Var x (Var __ c1')) m)
+      | this == z -> fresh \__ -> do
+          tc' <- repoint (Point __) z tc
+          rec $ Peano (Var __ tc') c0 (Var x (Var y c1)) m
+      | this == x -> fresh \__ -> do
+          c1' <- repoint (Point __) x c1
+          rec $ Peano (Var z tc) c0 (Var __ (Var y c1')) m
+      | this == y -> fresh \__ -> do
+          c1' <- repoint (Point __) y c1
+          rec $ Peano (Var z tc) c0 (Var x (Var __ c1')) m
       | otherwise ->
           liftM4
             Peano
@@ -255,22 +238,18 @@ instance MonadInterpret I E N P M where
     Equality ta a b -> liftM3 Equality (rec ta) (rec a) (rec b)
     Refl a -> Refl <$> rec a
     Path ta (Var x (Var y (Var p tc))) (Var z c) a b path
-      | this == x ->
-          rec =<< fresh \__ -> do
-            tc' <- repoint (Point __) x tc
-            pure (Path ta (Var __ (Var y (Var p tc'))) (Var z c) a b path)
-      | this == y ->
-          rec =<< fresh \__ -> do
-            tc' <- repoint (Point __) y tc
-            pure (Path ta (Var x (Var __ (Var p tc'))) (Var z c) a b path)
-      | this == p ->
-          rec =<< fresh \__ -> do
-            tc' <- repoint (Point __) x tc
-            pure (Path ta (Var x (Var y (Var __ tc'))) (Var z c) a b path)
-      | this == z ->
-          rec =<< fresh \__ -> do
-            c' <- repoint (Point __) z c
-            pure (Path ta (Var x (Var y (Var p tc))) (Var __ c') a b path)
+      | this == x -> fresh \__ -> do
+          tc' <- repoint (Point __) x tc
+          rec $ Path ta (Var __ (Var y (Var p tc'))) (Var z c) a b path
+      | this == y -> fresh \__ -> do
+          tc' <- repoint (Point __) y tc
+          rec $ Path ta (Var x (Var __ (Var p tc'))) (Var z c) a b path
+      | this == p -> fresh \__ -> do
+          tc' <- repoint (Point __) x tc
+          rec $ Path ta (Var x (Var y (Var __ tc'))) (Var z c) a b path
+      | this == z -> fresh \__ -> do
+          c' <- repoint (Point __) z c
+          rec $ Path ta (Var x (Var y (Var p tc))) (Var __ c') a b path
       | otherwise ->
           liftM6
             Path
@@ -304,11 +283,11 @@ instance MonadInterpret I E N P M where
     Point i -> maybe (throwError (UnknownIdentifier i)) pure =<< recall i
     --
     Func (Var _ ta) tb -> U <$> sameUniverse ta tb
-    Lambda x ta b -> do
+    Lambda (Var x ta) b -> do
       typ ta
       tb <- suppose (Var x ta) (infer b)
       pure (Func (Var x ta) tb)
-    Apply (Lambda x ta b) a -> do
+    Apply (Lambda (Var x ta) b) a -> do
       a √ ta
       suppose (Var x ta) (repoint a x b)
     Apply f _ -> throwError (NotAFunction f)
@@ -429,7 +408,7 @@ instance MonadInterpret I E N P M where
 
   compute :: P -> M P
   compute = \case
-    Apply (Lambda x ta b) a -> do
+    Apply (Lambda (Var x ta) b) a -> do
       a √ ta
       compute =<< repoint a x b
     Apply f _ -> throwError (NotAFunction f)
@@ -445,8 +424,7 @@ instance MonadInterpret I E N P M where
     Proj (Var _ Sigma{}) _ _ p -> throwError (NotAPair p)
     Proj (Var _ tp) _ _ _ -> throwError (NotASigmaType tp)
     --
-    Match (Var z tc) (Var x c) (Var y d) e -> do
-     case e of
+    Match (Var z tc) (Var x c) (Var y d) e -> case e of
       InL a -> do
         ta <- infer a
         suppose (Var x ta) do
