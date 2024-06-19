@@ -441,6 +441,23 @@ instance MonadInterpret I E N P M where
     Proj (Var _ Sigma{}) _ _ p -> throwError (NotAPair p)
     Proj (Var _ tp) _ _ _ -> throwError (NotASigmaType tp)
     --
+    Match z tc (Var x c) (Var y d) e -> case e of
+      InL a -> do
+        ta <- infer a
+        suppose (Var x ta) do
+          tc' <- repoint (InL a) z tc
+          c' <- repoint a x c
+          c' √ tc'
+          compute c'
+      InR b -> do
+        tb <- infer b
+        suppose (Var y tb) do
+          td' <- repoint (InR b) z tc
+          d' <- repoint b y d
+          d' √ td'
+          compute d'
+      _ -> throwError (NotAnInjection e)
+    --
     Peano z tc c0 (Var x (Var y c1)) nat -> do
       suppose (Var z Naturals) (typ tc)
       case nat of
