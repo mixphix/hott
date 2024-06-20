@@ -47,7 +47,7 @@ data E
   | SyntaxError P P
   | UnknownIdentifier I
   | AlreadyBound I P
-  | UniverseMismatch P Natural P Natural
+  | UniverseMismatch Natural Natural
   | TypeMismatch P P
   | NotAType P P
   | NotAFunction P
@@ -218,7 +218,7 @@ instance MonadInterpret I E N P M where
     --
     Naturals -> pure Naturals
     Zero -> pure Zero
-    Succ m -> pure (Succ m)
+    Succ m -> Succ <$> rec m
     Peano (Var z tc) c0 (Var x (Var y c1)) m
       | this == z -> fresh \__ -> do
           tc' <- repoint (Point __) z tc
@@ -284,17 +284,20 @@ instance MonadInterpret I E N P M where
     --
     Point i -> maybe (throwError (UnknownIdentifier i)) pure =<< recall i
     --
-    Func (Var _ ta) tb -> U <$> sameUniverse ta tb
+    Func (Var x ta) tb -> suppose (Var x ta) do
+      U <$> sameUniverse ta tb
     Lambda (Var x ta) b -> do
       typ ta
       tb <- suppose (Var x ta) (infer b)
       pure (Func (Var x ta) tb)
     Apply (Lambda (Var x ta) b) a -> do
       a √ ta
-      suppose (Var x ta) (repoint a x b)
+      suppose (Var x ta) do
+        infer =<< repoint a x b
     Apply f _ -> throwError (NotAFunction f)
     --
-    Sigma (Var _ ta) tb -> U <$> sameUniverse ta tb
+    Sigma (Var z ta) tb -> suppose (Var z ta) do
+      U <$> sameUniverse ta tb
     Pair a b -> do
       ta <- infer a
       fresh \__ -> suppose (Var __ ta) do
@@ -502,7 +505,7 @@ sameUniverse :: P -> P -> M Natural
 sameUniverse p0 p1 = do
   u0 <- universe p0
   u1 <- universe p1
-  unless (u0 == u1) $ throwError (UniverseMismatch p0 u0 p1 u1)
+  unless (u0 == u1) $ throwError (UniverseMismatch u0 u1)
   pure u0
 
 findPattern :: I -> [Var I P] -> Maybe P
