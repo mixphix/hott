@@ -85,7 +85,7 @@ data P
   | --
     Sum [Var I P]
   | Inj I P
-  | Cases I P [Var I P] P
+  | Cases (Var I P) [Var I P] P
   | --
     Naturals
   | Zero
@@ -201,16 +201,15 @@ instance MonadInterpret I E N P M where
       | this == i -> fresh \__ -> do
           rec . Inj __ =<< repoint (Point __) i a
       | otherwise -> Inj i <$> rec a
-    Cases z tc ps e
+    Cases (Var z tc) ps e
       | this == z -> fresh \__ -> do
           tc' <- repoint (Point __) z tc
           ps' <- traverse recV ps
-          rec . Cases __ tc' ps' =<< repoint (Point __) z e
+          rec . Cases (Var __ tc') ps' =<< repoint (Point __) z e
       | otherwise ->
-          liftM4
+          liftM3
             Cases
-            (pure z)
-            (rec tc)
+            (Var z <$> rec tc)
             (traverse recV ps)
             (rec e)
     --
@@ -324,7 +323,7 @@ instance MonadInterpret I E N P M where
         ta <- infer a
         fresh \__ -> suppose (Var z (Coproduct ta (Point __))) (typ tc)
         suppose (Var x ta) do
-          tc' <- repoint e x tc
+          tc' <- repoint e z tc
           c' <- repoint a x c
           c' √ tc'
           pure tc'
@@ -332,7 +331,7 @@ instance MonadInterpret I E N P M where
         tb <- infer b
         fresh \__ -> suppose (Var z (Coproduct (Point __) tb)) (typ tc)
         suppose (Var y tb) do
-          tc' <- repoint e y tc
+          tc' <- repoint e z tc
           d' <- repoint b y d
           d' √ tc'
           pure tc'
@@ -346,23 +345,20 @@ instance MonadInterpret I E N P M where
         [] -> U 0
         xs -> U (List.maximum xs)
     Inj i a -> bind (recall i) \case
-      Just (Func (Var _ tia) tib) -> do
-        ta <- infer a
-        unless (tia == ta) $ throwError (TypeMismatch tia ta)
-        pure tib
+      Just (Func (Var _ ta) tb) -> do
+        a √ ta
+        pure tb
       _ -> throwError (UnknownIdentifier i)
-    Cases z tc ps e -> case e of
-      Inj i a -> bind (infer e) \case
-        Sum vs -> case List.find (var \i_ _ -> i == i_) ps of
-          Nothing -> throwError (InjectionMismatch e (Sum vs))
-          Just (Var x c) -> do
-            suppose (Var z (Sum vs)) (typ tc)
-            suppose (Var x c) do
-              tc' <- repoint e x tc
-              c' <- repoint a x c
-              c' √ tc'
-              pure tc'
-        _ -> throwError Crash
+    Cases (Var z tc) ps e -> case e of
+      Inj i a -> do
+        _ <- infer a
+        bind (infer e) \case
+          Sum vs -> case findPattern i ps of
+            Nothing -> throwError (InjectionMismatch e (Sum vs))
+            Just _ -> do
+              suppose (Var z (Sum vs)) (typ tc)
+              repoint e z tc
+          _ -> throwError Crash
       _ -> throwError (NotAnInjection e)
     --
     Naturals -> pure (U 0)
@@ -441,6 +437,21 @@ instance MonadInterpret I E N P M where
           compute d'
       _ -> throwError (NotAnInjection e)
     --
+    Cases (Var z tc) cs e -> case e of
+      Inj i a -> bind (recall i) \case
+        Just (Func (Var x tia) (Sum _)) -> do
+          ta <- infer a
+          unless (tia == ta) $ throwError (TypeMismatch tia ta)
+          case findPattern i cs of
+            Nothing -> throwError (UnknownIdentifier i)
+            Just c -> suppose (Var x ta) do
+              tc' <- repoint (Inj i a) z tc
+              c' <- repoint a x c
+              c' √ tc'
+              compute c'
+        _ -> throwError (UnknownIdentifier i)
+      _ -> throwError (NotAnInjection e)
+    --
     Peano (Var z tc) c0 (Var x (Var y c1)) nat -> do
       suppose (Var z Naturals) (typ tc)
       case nat of
@@ -468,8 +479,12 @@ sameUniverse :: P -> P -> M Natural
 sameUniverse p0 p1 = do
   u0 <- universe p0
   u1 <- universe p1
-  unless (u0 == u1) (throwError (UniverseMismatch p0 u0 p1 u1))
+  unless (u0 == u1) $ throwError (UniverseMismatch p0 u0 p1 u1)
   pure u0
+
+findPattern :: I -> [Var I P] -> Maybe P
+findPattern i ps =
+  List.find (var \i_ _ -> i == i_) ps <&> \(Var _ p) -> p
 
 (-->) :: P -> P -> M P
 ta --> tb = sameUniverse ta tb >> fresh \__ -> pure (Func (Var __ ta) tb)
