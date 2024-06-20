@@ -26,8 +26,8 @@ import Data.Either
 import Data.Eq
 import Data.Function
 import Data.List qualified as List
-import Data.Map (Map)
-import Data.Map.Strict (insert, lookup)
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map (insert, lookup)
 import Data.Maybe
 import Data.Monoid (mempty)
 import Data.Ord
@@ -56,6 +56,9 @@ data E
   | NotANatural P
   | NotAnInjection P
   | InjectionMismatch P P
+  | NonidenticalRefl P P P
+  | NotAReflection P
+  | NotAPath P
   deriving (Eq, Show)
 
 -- | eNvironment
@@ -111,11 +114,11 @@ instance SyntaxError E P where syntaxError = SyntaxError
 
 instance MonadInterpret I E N P M where
   recall :: I -> M (Maybe P)
-  recall i = gets (lookup i . gamma)
+  recall i = gets (Map.lookup i . gamma)
 
   assume :: Var I P -> M ()
   assume (Var i p) = bind (recall i) \case
-    Nothing -> modify \n -> n{gamma = insert i p n.gamma}
+    Nothing -> modify \n -> n{gamma = Map.insert i p n.gamma}
     Just ip -> throwError (AlreadyBound i ip)
 
   fresh :: (I -> M x) -> M x
@@ -463,6 +466,26 @@ instance MonadInterpret I E N P M where
             c1' √ tc'
             compute c1'
         _ -> throwError (NotANatural nat)
+    --
+    Path ta (Var x (Var y (Var p tc))) (Var z c) a b (Refl a') -> do
+      unless (List.all (a' ==) [a, b]) $ throwError (NonidenticalRefl a' a b)
+      supposeAll
+        [ Var x ta
+        , Var y ta
+        , Var p (Equality ta (Point x) (Point y))
+        ]
+        (typ tc)
+      suppose (Var z ta) do
+        tc' <-
+          ( repoint (Point z) x
+              >=> repoint (Point z) y
+              >=> repoint (Refl (Point z)) p
+            )
+            tc
+        c' <- repoint a z c
+        c' √ tc'
+        compute c'
+    Path _ _ _ _ _ e -> throwError (NotAReflection e)
     --
     p -> pure p
 

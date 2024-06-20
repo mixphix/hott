@@ -13,6 +13,7 @@ module Control.Monad.Interpret
   , (√)
   , locally
   , suppose
+  , supposeAll
   , InterpretT
   , runInterpretT
   , Interpret
@@ -71,6 +72,10 @@ suppose __ interpret = do
   x <- assume __ >> interpret
   put n
   pure x
+supposeAll :: (MonadInterpret i e n p m) => [Var i p] -> m x -> m x
+supposeAll __ interpret = case __ of
+  [] -> interpret
+  v : vs -> suppose v (supposeAll vs interpret)
 
 type InterpretT i e n p m x = ExceptT e (StateT n m) x
 type Interpret i e n p x = InterpretT i e n p Identity x
