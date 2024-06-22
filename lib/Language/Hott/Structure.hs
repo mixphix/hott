@@ -27,9 +27,8 @@ import Data.Eq
 import Data.Function
 import Data.List qualified as List
 import Data.Map.Strict (Map)
-import Data.Map.Strict qualified as Map (insert, lookup)
+import Data.Map.Strict qualified as Map
 import Data.Maybe
-import Data.Monoid (mempty)
 import Data.Ord
 import Data.Semigroup (Semigroup ((<>)))
 import Data.String
@@ -65,7 +64,16 @@ data E
 data N = N {gamma :: Map I P, state :: Natural} deriving (Eq, Ord, Show)
 
 n0 :: N
-n0 = N mempty 0
+n0 = N gamma 0
+ where
+  gamma =
+    Map.fromList
+      [ ("Unit", U 0)
+      , ("()", Point "Unit")
+      , ("Bool", U 0)
+      , ("True", Point "Bool")
+      , ("False", Point "Bool")
+      ]
 
 -- | Point
 data P
@@ -344,9 +352,7 @@ instance MonadInterpret I E N P M where
       _ -> throwError (NotAnInjection e)
     --
     Sum vs -> do
-      us <- for vs \(Var i a) -> fresh \__ -> do
-        assume (Var i (Func (Var __ a) (Sum vs)))
-        universe a
+      us <- traverse (var $ const universe) vs
       pure case us of
         [] -> U 0
         xs -> U (List.maximum xs)
