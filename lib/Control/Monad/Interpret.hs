@@ -1,7 +1,6 @@
 module Control.Monad.Interpret
   ( Var (Var)
   , var
-  , SyntaxError (syntaxError)
   , MonadInterpret
     ( recall
     , assume
@@ -10,7 +9,6 @@ module Control.Monad.Interpret
     , infer
     , compute
     )
-  , (√)
   , locally
   , suppose
   , supposeAll
@@ -39,12 +37,9 @@ data Var i p = Var i p deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
 var :: (i -> p -> x) -> (Var i p -> x)
 var f (Var i p) = f i p
 
-class (Eq p) => SyntaxError e p where syntaxError :: p -> p -> e
-
 class
   ( MonadError e m
   , MonadState n m
-  , SyntaxError e p
   ) =>
   MonadInterpret i e n p m
     | m -> i e n p
@@ -58,8 +53,6 @@ class
   infer :: p -> m p
   compute :: p -> m p
 
-(√) :: (MonadInterpret i e n p m) => p -> p -> m ()
-a √ t = infer a >>= \ta -> unless (t == ta) (throwError (syntaxError t ta))
 locally :: (MonadInterpret i e n p m) => n -> m x -> m x
 locally __ interpret = do
   n <- get

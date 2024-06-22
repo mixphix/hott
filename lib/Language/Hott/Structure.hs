@@ -110,8 +110,6 @@ newtype M x = M (Interpret I E N P x)
 runM :: M x -> N -> (Either E x, N)
 runM (M t) = runInterpret t
 
-instance SyntaxError E P where syntaxError = SyntaxError
-
 instance MonadInterpret I E N P M where
   recall :: I -> M (Maybe P)
   recall i = gets (Map.lookup i . gamma)
@@ -285,7 +283,9 @@ instance MonadInterpret I E N P M where
     Point i -> maybe (throwError (UnknownIdentifier i)) pure =<< recall i
     --
     Func (Var x ta) tb -> suppose (Var x ta) do
-      U <$> sameUniverse ta tb
+      ua <- universe ta
+      ub <- universe tb
+      pure (U $ max ua ub)
     Lambda (Var x ta) b -> do
       typ ta
       tb <- suppose (Var x ta) (infer b)
@@ -494,6 +494,9 @@ instance MonadInterpret I E N P M where
 
 typ :: P -> M ()
 typ = void . universe
+
+(√) :: P -> P -> M ()
+a √ t = infer a >>= \ta -> unless (t == ta) (throwError (SyntaxError t ta))
 
 universe :: P -> M Natural
 universe point =

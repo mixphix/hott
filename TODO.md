@@ -1,0 +1,1 @@
+- `(√)` should use a structural equality check by freshening all interior variables
