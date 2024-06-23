@@ -290,6 +290,146 @@ instance MonadInterpret I N P M where
       e <- me
       z a b c d e <$> mf
 
+  a === b = case (a, b) of
+    (U m, U n) -> do
+      unless (m == n) $ tell [UniverseMismatch m n]
+    (Point i, Point j) -> do
+      unless (i == j) $ tell [Disequality a b]
+    (Func (Var v0 a0) b0, Func (Var v1 a1) b1) -> fresh \__ -> do
+      a0_ <- repoint (Point __) v0 a0
+      b0_ <- repoint (Point __) v0 b0
+      let f0 = Func (Var __ a0_) b0_
+      a1_ <- repoint (Point __) v1 a1
+      b1_ <- repoint (Point __) v1 b1
+      let f1 = Func (Var __ a1_) b1_
+      unless (f0 == f1) $ tell [Disequality a b]
+    (Lambda (Var v0 a0) b0, Lambda (Var v1 a1) b1) -> fresh \__ -> do
+      a0_ <- repoint (Point __) v0 a0
+      b0_ <- repoint (Point __) v0 b0
+      let f0 = Lambda (Var __ a0_) b0_
+      a1_ <- repoint (Point __) v1 a1
+      b1_ <- repoint (Point __) v1 b1
+      let f1 = Lambda (Var __ a1_) b1_
+      unless (f0 == f1) $ tell [Disequality a b]
+    (Sigma (Var v0 a0) b0, Sigma (Var v1 a1) b1) -> fresh \__ -> do
+      a0_ <- repoint (Point __) v0 a0
+      b0_ <- repoint (Point __) v0 b0
+      let f0 = Sigma (Var __ a0_) b0_
+      a1_ <- repoint (Point __) v1 a1
+      b1_ <- repoint (Point __) v1 b1
+      let f1 = Sigma (Var __ a1_) b1_
+      unless (f0 == f1) $ tell [Disequality a b]
+    (Pair a0 b0, Pair a1 b1) -> do
+      a0 === a1
+      b0 === b1
+    ( Proj (Var q0 t0) (Var z0 c0) (Var x0 (Var y0 g0)) p0
+      , Proj (Var q1 t1) (Var z1 c1) (Var x1 (Var y1 g1)) p1
+      ) -> fresh \_q -> fresh \_z -> fresh \_x -> fresh \_y -> do
+        t0_ <- repoint (Point _q) q0 t0
+        c0_ <- repoint (Point _z) z0 c0
+        g0_ <- (repoint (Point _x) x0 >=> repoint (Point _y) y0) g0
+        let f0 = Proj (Var _q t0_) (Var _z c0_) (Var _x (Var _y g0_)) p0
+        t1_ <- repoint (Point _q) q1 t1
+        c1_ <- repoint (Point _z) z1 c1
+        g1_ <- (repoint (Point _x) x1 >=> repoint (Point _y) y1) g1
+        let f1 = Proj (Var _q t1_) (Var _z c1_) (Var _x (Var _y g1_)) p1
+        p0 === p1
+        unless (f0 == f1) $ tell [Disequality a b]
+    (Coproduct a0 b0, Coproduct a1 b1) -> do
+      a0 === a1
+      b0 === b1
+    (InL _0, InL _1) -> _0 === _1
+    (InR _0, InR _1) -> _0 === _1
+    ( Match (Var z0 t0) (Var x0 a0) (Var y0 b0) p0
+      , Match (Var z1 t1) (Var x1 a1) (Var y1 b1) p1
+      ) -> fresh \_z -> fresh \_x -> fresh \_y -> do
+        t0_ <- repoint (Point _z) z0 t0
+        a0_ <- repoint (Point _x) x0 a0
+        b0_ <- repoint (Point _y) y0 b0
+        let f0 = Match (Var _z t0_) (Var _x a0_) (Var _y b0_) p0
+        t1_ <- repoint (Point _z) z1 t1
+        a1_ <- repoint (Point _x) x1 a1
+        b1_ <- repoint (Point _y) y1 b1
+        let f1 = Match (Var _z t1_) (Var _x a1_) (Var _y b1_) p1
+        p0 === p1
+        unless (f0 == f1) $ tell [Disequality a b]
+    (Sum v0, Sum v1) -> do
+      zipWithM_
+        ( \(Var i0 p0) (Var i1 p1) -> do
+            unless (i0 == i1) $ tell [Disequality a b]
+            p0 === p1
+        )
+        v0
+        v1
+    (Inj i0 a0, Inj i1 a1) -> do
+      unless (i0 == i1) $ tell [Disequality a b]
+      fresh \__ -> do
+        a0_ <- repoint (Point __) i0 a0
+        a1_ <- repoint (Point __) i1 a1
+        unless (a0_ == a1_) $ tell [Disequality a b]
+    (Cases (Var z0 t0) ps0 e0, Cases (Var z1 t1) ps1 e1) -> fresh \__ -> do
+      t0_ <- repoint (Point __) z0 t0
+      t1_ <- repoint (Point __) z1 t1
+      (ps0_, ps1_) <-
+        zipWithM
+          ( \(Var i0 p0) (Var i1 p1) -> do
+              unless (i0 == i1) $ tell [Disequality a b]
+              p0 === p1
+              pure (Var i0 p0, Var i1 p1)
+          )
+          (List.sort ps0)
+          (List.sort ps1)
+          <&> List.unzip
+      e0 === e1
+      let f0 = Cases (Var __ t0_) ps0_ e0
+          f1 = Cases (Var __ t1_) ps1_ e1
+      unless (f0 == f1) $ tell [Disequality a b]
+    (Naturals, Naturals) -> pure ()
+    (Zero, Zero) -> pure ()
+    (Succ m, Succ n) -> m === n
+    ( Peano (Var z0 t0) c0 (Var x0 (Var y0 c'0)) m0
+      , Peano (Var z1 t1) c1 (Var x1 (Var y1 c'1)) m1
+      ) -> fresh \_z -> fresh \_x -> fresh \_y -> do
+        t0_ <- repoint (Point _z) z0 t0
+        c'0_ <- (repoint (Point _x) x0 >=> repoint (Point _y) y0) c'0
+        let f0 = Peano (Var _z t0_) c0 (Var _x (Var _y c'0_)) m0
+        t1_ <- repoint (Point _z) z1 t1
+        c'1_ <- (repoint (Point _x) x1 >=> repoint (Point _y) y1) c'1
+        let f1 = Peano (Var _z t1_) c1 (Var _x (Var _y c'1_)) m1
+        c0 === c1
+        m0 === m1
+        unless (f0 == f1) $ tell [Disequality a b]
+    (Equality t0 a0 b0, Equality t1 a1 b1) -> do
+      t0 === t1
+      a0 === a1
+      b0 === b1
+    (Refl _0, Refl _1) -> _0 === _1
+    ( Path ta0 (Var x0 (Var y0 (Var p0 t0))) (Var z0 c0) a0 b0 e0
+      , Path ta1 (Var x1 (Var y1 (Var p1 t1))) (Var z1 c1) a1 b1 e1
+      ) -> fresh \_x -> fresh \_y -> fresh \_p -> fresh \_z -> do
+        ta0 === ta1
+        t0_ <-
+          ( repoint (Point _x) x0
+              >=> repoint (Point _y) y0
+              >=> repoint (Point _p) p0
+            )
+            t0
+        c0_ <- repoint (Point _z) z0 c0
+        let f0 = Path ta0 (Var _x (Var _y (Var _p t0_))) (Var _z c0_) a0 b0 e0
+        t1_ <-
+          ( repoint (Point _x) x1
+              >=> repoint (Point _y) y1
+              >=> repoint (Point _p) p1
+            )
+            t1
+        c1_ <- repoint (Point _z) z1 c1
+        let f1 = Path ta1 (Var _x (Var _y (Var _p t1_))) (Var _z c1_) a1 b1 e1
+        a0 === a1
+        b0 === b1
+        e0 === e1
+        unless (f0 == f1) $ tell [Disequality a b]
+    _ -> tell [Disequality a b]
+
   infer :: P -> M P
   infer this = case this of
     U u -> pure (U (succ u))
@@ -512,7 +652,7 @@ typ :: P -> M ()
 typ = void . universe
 
 (√) :: P -> P -> M ()
-a √ t = infer a >>= \ta -> unless (t == ta) (tell [SyntaxError t ta])
+a √ t = (t ===) =<< infer a
 
 universe :: P -> M Natural
 universe point =

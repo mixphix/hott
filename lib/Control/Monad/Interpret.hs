@@ -6,6 +6,7 @@ module Control.Monad.Interpret
     , assume
     , fresh
     , repoint
+    , (===)
     , infer
     , compute
     )
@@ -41,6 +42,7 @@ class (MonadState n m) => MonadInterpret i n p m | m -> i n p where
 
   fresh :: (i -> m x) -> m x
   repoint :: p -> i -> (p -> m p)
+  (===) :: p -> p -> m ()
 
   infer :: p -> m p
   compute :: p -> m p
