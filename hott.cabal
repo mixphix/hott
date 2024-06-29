@@ -38,4 +38,4 @@ library
   exposed-modules:
     Control.Monad.Interpret
 
-    Language.Hott.Structure
+    Language.Hott

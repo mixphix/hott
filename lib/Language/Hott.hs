@@ -1,4 +1,4 @@
-module Language.Hott.Structure
+module Language.Hott
   ( I (..)
   , E (..)
   , N (..)
@@ -679,3 +679,15 @@ ta ** tb = sameUniverse ta tb >> fresh \__ -> pure (Sigma (Var __ ta) tb)
 
 -- negate :: P -> M P
 -- negate tx = typ tx >> fresh \x -> pure (Func x tx Bottom)
+
+----- Parsers & Syntax -----
+
+keywords :: [Text]
+keywords =
+  [ "space"
+  , "point"
+  , "proof"
+  , "qed"
+  , "bind"
+  , "intro"
+  ]
