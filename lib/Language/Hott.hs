@@ -24,8 +24,10 @@ import Control.Monad.Writer (MonadWriter)
 import Control.Monad.Writer qualified
 import Data.Bool
 import Data.Eq
+import Data.Foldable (Foldable (fold))
 import Data.Function
 import Data.Functor
+import Data.List (intercalate, intersperse)
 import Data.List qualified as List
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -34,6 +36,8 @@ import Data.Ord
 import Data.Semigroup (Semigroup ((<>)))
 import Data.String
 import Data.Text (Text)
+import Data.Text qualified as Text
+import Data.Text.Internal.StrictBuilder qualified as SB
 import GHC.Enum
 import GHC.Err (undefined)
 import GHC.Show
@@ -412,7 +416,7 @@ instance MonadInterpret I N P M where
           ( repoint (Point _x) x0
               >=> repoint (Point _y) y0
               >=> repoint (Point _p) p0
-            )
+          )
             t0
         c0_ <- repoint (Point _z) z0 c0
         let f0 = Path ta0 (Var _x (Var _y (Var _p t0_))) (Var _z c0_) a0 b0 e0
@@ -420,7 +424,7 @@ instance MonadInterpret I N P M where
           ( repoint (Point _x) x1
               >=> repoint (Point _y) y1
               >=> repoint (Point _p) p1
-            )
+          )
             t1
         c1_ <- repoint (Point _z) z1 c1
         let f1 = Path ta1 (Var _x (Var _y (Var _p t1_))) (Var _z c1_) a1 b1 e1
@@ -555,7 +559,7 @@ instance MonadInterpret I N P M where
         ( repoint (Point z) x
             >=> repoint (Point z) y
             >=> repoint (Refl (Point z)) p
-          )
+        )
           tc
       suppose (Var z ta) (c √ tc')
       pure tc'
@@ -639,7 +643,7 @@ instance MonadInterpret I N P M where
           ( repoint (Point z) x
               >=> repoint (Point z) y
               >=> repoint (Refl (Point z)) p
-            )
+          )
             tc
         c' <- repoint a z c
         c' √ tc'
@@ -682,12 +686,190 @@ ta ** tb = sameUniverse ta tb >> fresh \__ -> pure (Sigma (Var __ ta) tb)
 
 ----- Parsers & Syntax -----
 
-keywords :: [Text]
-keywords =
-  [ "space"
-  , "point"
-  , "proof"
-  , "qed"
-  , "bind"
-  , "intro"
-  ]
+type Written = SB.StrictBuilder
+
+class ToWritten p where
+  toWritten :: p -> Written
+  default toWritten :: (Show p) => p -> Written
+  toWritten = SB.fromText . Text.pack . show
+
+instance ToWritten String where toWritten = SB.fromText . Text.pack
+instance ToWritten Text where toWritten = SB.fromText
+deriving newtype instance ToWritten I
+instance (ToWritten p) => ToWritten (Var I p) where
+  toWritten (Var i p) =
+    fold
+      [ toWritten @Text "("
+      , toWritten i
+      , toWritten @Text " : "
+      , toWritten p
+      , toWritten @Text ")"
+      ]
+
+written :: (ToWritten p) => p -> Text
+written = SB.toText . toWritten
+
+instance ToWritten P where
+  toWritten = \case
+    U n -> toWritten @Text "U " <> foldMap SB.fromChar (show n)
+    Point name -> toWritten name
+    Func v@(Var _x _ta) tb ->
+      fold
+        [ toWritten @Text ""
+        , toWritten v
+        , toWritten @Text ". "
+        , toWritten tb
+        ]
+    Lambda v@(Var _x _ta) b ->
+      fold
+        [ toWritten @Text "\\"
+        , toWritten v
+        , toWritten @Text ". "
+        , toWritten b
+        ]
+    Apply p q -> toWritten p <> toWritten @Text " " <> toWritten q
+    Sigma v@(Var _x _ta) tb ->
+      fold
+        [ toWritten @Text ""
+        , toWritten v
+        , toWritten @Text ". "
+        , toWritten tb
+        ]
+    Pair a b ->
+      fold
+        [ toWritten @Text "("
+        , toWritten a
+        , toWritten @Text ", "
+        , toWritten b
+        , toWritten @Text ")"
+        ]
+    Proj vp (Var z tc) (Var x (Var y g)) pair ->
+      fold
+        [ toWritten @Text "ind_"
+        , toWritten vp
+        , toWritten @Text "(\\"
+        , toWritten z
+        , toWritten @Text ". "
+        , toWritten tc
+        , toWritten @Text ", \\"
+        , toWritten x
+        , toWritten y
+        , toWritten @Text ". "
+        , toWritten g
+        , toWritten @Text ", "
+        , toWritten pair
+        , toWritten @Text ")"
+        ]
+    Coproduct ta tb -> toWritten ta <> toWritten @Text " + " <> toWritten tb
+    InL a -> toWritten @Text "InL (" <> toWritten a <> toWritten @Text ")"
+    InR b -> toWritten @Text "InR (" <> toWritten b <> toWritten @Text ")"
+    Match (Var z tc) (Var x c) (Var y d) e ->
+      fold
+        [ toWritten @Text "ind_+"
+        , toWritten @Text "(\\"
+        , toWritten z
+        , toWritten @Text ". "
+        , toWritten tc
+        , toWritten @Text ", \\"
+        , toWritten x
+        , toWritten @Text ". "
+        , toWritten c
+        , toWritten @Text ", \\"
+        , toWritten y
+        , toWritten @Text ". "
+        , toWritten d
+        , toWritten @Text ", "
+        , toWritten e
+        , toWritten @Text ")"
+        ]
+    Sum vs ->
+      fold $
+        [toWritten @Text "Sum ["]
+          <> intersperse (toWritten @Text ", ") (fmap toWritten vs)
+          <> [toWritten @Text "]"]
+    Inj i a -> toWritten i <> toWritten @Text " (" <> toWritten a <> toWritten @Text ")"
+    Cases (Var z tc) ps e ->
+      fold $
+        [ toWritten @Text "ind_Sum"
+        , toWritten @Text "(\\"
+        , toWritten z
+        , toWritten @Text ". "
+        , toWritten tc
+        , toWritten @Text ", ["
+        ]
+          <> intersperse (toWritten @Text ", ") (fmap toWritten ps)
+          <> [ toWritten @Text "], "
+             , toWritten e
+             , toWritten @Text ")"
+             ]
+    Naturals -> toWritten @Text "Nat"
+    Zero -> toWritten @Text "0"
+    Succ m -> toWritten @Text "Succ (" <> toWritten m <> toWritten @Text " )"
+    Peano (Var z tc) c0 (Var x (Var y c1)) m ->
+      fold
+        [ toWritten @Text "ind_+"
+        , toWritten @Text "(\\"
+        , toWritten z
+        , toWritten @Text ". "
+        , toWritten tc
+        , toWritten @Text ", "
+        , toWritten c0
+        , toWritten @Text ", \\"
+        , toWritten x
+        , toWritten @Text " "
+        , toWritten y
+        , toWritten @Text ". "
+        , toWritten c1
+        , toWritten @Text ", "
+        , toWritten m
+        , toWritten @Text ")"
+        ]
+    Equality ta a b ->
+      toWritten a
+        <> toWritten @Text " ==_"
+        <> toWritten ta
+        <> toWritten @Text " "
+        <> toWritten b
+    Refl a -> toWritten @Text "Refl " <> toWritten a
+    Path ta (Var x (Var y (Var p tc))) (Var z c) a b path ->
+      fold
+        [ toWritten @Text "ind_=="
+        , toWritten ta
+        , toWritten @Text "(\\"
+        , toWritten x
+        , toWritten @Text " "
+        , toWritten y
+        , toWritten @Text " "
+        , toWritten p
+        , toWritten @Text ". "
+        , toWritten tc
+        , toWritten @Text ", \\"
+        , toWritten z
+        , toWritten @Text ". "
+        , toWritten c
+        , toWritten @Text ", "
+        , toWritten a
+        , toWritten @Text ", "
+        , toWritten b
+        , toWritten @Text ", "
+        , toWritten path
+        , toWritten @Text ")"
+        ]
+    FunExt f g ->
+      fold
+        [ toWritten @Text "funext("
+        , toWritten f
+        , toWritten @Text ", "
+        , toWritten g
+        , toWritten @Text ")"
+        ]
+    UA i ta tb ->
+      fold
+        [ toWritten @Text "ua("
+        , toWritten $ show i
+        , toWritten @Text ", "
+        , toWritten ta
+        , toWritten @Text ", "
+        , toWritten tb
+        , toWritten @Text ")"
+        ]
