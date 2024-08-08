@@ -31,8 +31,10 @@ import Data.Maybe
 import Data.Ord
 import Data.Traversable
 import GHC.Show
+import Text.Read (Read)
 
-data Var i p = Var i p deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+data Var i p = Var i p
+  deriving (Eq, Ord, Show, Read, Functor, Foldable, Traversable)
 var :: (i -> p -> x) -> (Var i p -> x)
 var f (Var i p) = f i p
 
