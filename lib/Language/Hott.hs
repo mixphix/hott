@@ -27,6 +27,7 @@ import Data.Eq
 import Data.Function
 import Data.Functor
 import Data.List qualified as List
+import Data.List.NonEmpty (NonEmpty (..), (<|))
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe
@@ -68,10 +69,11 @@ data E
   deriving (Eq, Show, Read)
 
 -- | eNvironment
-data N = N {gamma :: Map I P, state :: Natural} deriving (Eq, Ord, Show)
+data N = N {gamma :: NonEmpty (Map I P), state :: Natural}
+  deriving (Eq, Ord, Show)
 
 n0 :: N
-n0 = N gamma 0
+n0 = N (pure gamma) 0
  where
   gamma =
     Map.fromList
@@ -125,13 +127,22 @@ newtype M x = M (Interpret I E N P x)
 runM :: M x -> N -> ((x, [E]), N)
 runM (M t) = runInterpret t
 
+-- scoped :: M x -> M x
+-- scoped mx = do
+--   n <- get
+--   put n{gamma = Map.empty <| n.gamma}
+--   x <- mx
+--   put n
+--   pure x
+
 instance MonadInterpret I N P M where
   recall :: I -> M (Maybe P)
-  recall i = gets (Map.lookup i . gamma)
-
+  recall i = gets (asum . fmap (Map.lookup i) . gamma)
   assume :: Var I P -> M ()
   assume (Var i p) = bind (recall i) \case
-    Nothing -> modify \n -> n{gamma = Map.insert i p n.gamma}
+    Nothing -> modify \n ->
+      let g :| gs = n.gamma
+       in n{gamma = Map.insert i p g :| gs}
     Just ip -> tell [AlreadyBound i ip]
 
   fresh :: (I -> M x) -> M x
@@ -413,7 +424,7 @@ instance MonadInterpret I N P M where
           ( repoint (Point _x) x0
               >=> repoint (Point _y) y0
               >=> repoint (Point _p) p0
-          )
+            )
             t0
         c0_ <- repoint (Point _z) z0 c0
         let f0 = Path ta0 (Var _x (Var _y (Var _p t0_))) (Var _z c0_) a0 b0 e0
@@ -421,7 +432,7 @@ instance MonadInterpret I N P M where
           ( repoint (Point _x) x1
               >=> repoint (Point _y) y1
               >=> repoint (Point _p) p1
-          )
+            )
             t1
         c1_ <- repoint (Point _z) z1 c1
         let f1 = Path ta1 (Var _x (Var _y (Var _p t1_))) (Var _z c1_) a1 b1 e1
@@ -556,7 +567,7 @@ instance MonadInterpret I N P M where
         ( repoint (Point z) x
             >=> repoint (Point z) y
             >=> repoint (Refl (Point z)) p
-        )
+          )
           tc
       suppose (Var z ta) (c √ tc')
       pure tc'
@@ -640,7 +651,7 @@ instance MonadInterpret I N P M where
           ( repoint (Point z) x
               >=> repoint (Point z) y
               >=> repoint (Refl (Point z)) p
-          )
+            )
             tc
         c' <- repoint a z c
         c' √ tc'

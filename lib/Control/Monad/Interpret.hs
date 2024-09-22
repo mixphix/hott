@@ -10,7 +10,6 @@ module Control.Monad.Interpret
     , infer
     , compute
     )
-  , locally
   , suppose
   , supposeAll
   , InterpretT
@@ -49,12 +48,6 @@ class (MonadState n m) => MonadInterpret i n p m | m -> i n p where
   infer :: p -> m p
   compute :: p -> m p
 
-locally :: (MonadInterpret i n p m) => n -> m x -> m x
-locally __ interpret = do
-  n <- get
-  x <- put __ >> interpret
-  put n
-  pure x
 suppose :: (MonadInterpret i n p m) => Var i p -> m x -> m x
 suppose __ interpret = do
   n <- get
