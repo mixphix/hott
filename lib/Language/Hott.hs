@@ -25,6 +25,7 @@ import Control.Monad.State
 import Data.Bool
 import Data.Either
 import Data.Eq
+import Data.Foldable
 import Data.Function
 import Data.List qualified as List
 import Data.List.NonEmpty (NonEmpty (..))
@@ -140,9 +141,13 @@ instance MonadInterpret I N P M where
   recall i = gets (asum . fmap (Map.lookup i) . gamma)
   assume :: Var I P -> M ()
   assume (Var i p) = bind (recall i) \case
-    Nothing -> modify \n ->
-      let g :| gs = n.gamma
-       in n{gamma = Map.insert i p g :| gs}
+    Nothing -> do
+      modify \n ->
+        let g :| gs = n.gamma
+         in n{gamma = Map.insert i p g :| gs}
+      case p of
+        Sum vs -> for_ vs \(Var i_ p_) -> fresh \__ -> assume (Var i_ $ Func (Var __ p_) (Point i))
+        _ -> pure ()
     Just ip -> throwError (AlreadyBound i ip)
 
   fresh :: (I -> M x) -> M x
