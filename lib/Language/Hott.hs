@@ -5,6 +5,7 @@ module Language.Hott
   , P (..)
   , M (..)
   , runM
+  , evalM
   , n0
   , typ
   , universe
@@ -18,16 +19,15 @@ where
 import Control.Applicative
 import Control.Block
 import Control.Monad
+import Control.Monad.Except
 import Control.Monad.Interpret
 import Control.Monad.State
-import Control.Monad.Writer (MonadWriter)
-import Control.Monad.Writer qualified
 import Data.Bool
+import Data.Either
 import Data.Eq
 import Data.Function
-import Data.Functor
 import Data.List qualified as List
-import Data.List.NonEmpty (NonEmpty (..), (<|))
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe
@@ -35,14 +35,11 @@ import Data.Ord
 import Data.Semigroup (Semigroup ((<>)))
 import Data.String
 import Data.Text (Text)
+import Data.Tuple
 import GHC.Enum
-import GHC.Err (undefined)
 import GHC.Show
 import Numeric.Natural (Natural)
 import Text.Read (Read)
-
-tell :: (MonadWriter w m) => w -> m x
-tell e = Control.Monad.Writer.tell e $> undefined
 
 -- | Identifier
 newtype I = I Text deriving newtype (IsString, Eq, Ord, Semigroup, Show, Read)
@@ -122,10 +119,13 @@ data P
 
 -- Monad
 newtype M x = M (Interpret I E N P x)
-  deriving newtype (Functor, Applicative, Monad, MonadWriter [E], MonadState N)
+  deriving newtype (Functor, Applicative, Monad, MonadError E, MonadState N)
 
-runM :: M x -> N -> ((x, [E]), N)
+runM :: M x -> N -> Either E (x, N)
 runM (M t) = runInterpret t
+
+evalM :: M x -> N -> Either E x
+evalM (M t) = fmap fst . runInterpret t
 
 -- scoped :: M x -> M x
 -- scoped mx = do
@@ -143,7 +143,7 @@ instance MonadInterpret I N P M where
     Nothing -> modify \n ->
       let g :| gs = n.gamma
        in n{gamma = Map.insert i p g :| gs}
-    Just ip -> tell [AlreadyBound i ip]
+    Just ip -> throwError (AlreadyBound i ip)
 
   fresh :: (I -> M x) -> M x
   fresh rec = do
@@ -304,9 +304,9 @@ instance MonadInterpret I N P M where
 
   a === b = case (a, b) of
     (U m, U n) -> do
-      unless (m == n) $ tell [UniverseMismatch m n]
+      unless (m == n) $ throwError (UniverseMismatch m n)
     (Point i, Point j) -> do
-      unless (i == j) $ tell [Disequality a b]
+      unless (i == j) $ throwError (Disequality a b)
     (Func (Var v0 a0) b0, Func (Var v1 a1) b1) -> fresh \__ -> do
       a0_ <- repoint (Point __) v0 a0
       b0_ <- repoint (Point __) v0 b0
@@ -314,7 +314,7 @@ instance MonadInterpret I N P M where
       a1_ <- repoint (Point __) v1 a1
       b1_ <- repoint (Point __) v1 b1
       let f1 = Func (Var __ a1_) b1_
-      unless (f0 == f1) $ tell [Disequality a b]
+      unless (f0 == f1) $ throwError (Disequality a b)
     (Lambda (Var v0 a0) b0, Lambda (Var v1 a1) b1) -> fresh \__ -> do
       a0_ <- repoint (Point __) v0 a0
       b0_ <- repoint (Point __) v0 b0
@@ -322,7 +322,7 @@ instance MonadInterpret I N P M where
       a1_ <- repoint (Point __) v1 a1
       b1_ <- repoint (Point __) v1 b1
       let f1 = Lambda (Var __ a1_) b1_
-      unless (f0 == f1) $ tell [Disequality a b]
+      unless (f0 == f1) $ throwError (Disequality a b)
     (Sigma (Var v0 a0) b0, Sigma (Var v1 a1) b1) -> fresh \__ -> do
       a0_ <- repoint (Point __) v0 a0
       b0_ <- repoint (Point __) v0 b0
@@ -330,7 +330,7 @@ instance MonadInterpret I N P M where
       a1_ <- repoint (Point __) v1 a1
       b1_ <- repoint (Point __) v1 b1
       let f1 = Sigma (Var __ a1_) b1_
-      unless (f0 == f1) $ tell [Disequality a b]
+      unless (f0 == f1) $ throwError (Disequality a b)
     (Pair a0 b0, Pair a1 b1) -> do
       a0 === a1
       b0 === b1
@@ -346,7 +346,7 @@ instance MonadInterpret I N P M where
         g1_ <- (repoint (Point _x) x1 >=> repoint (Point _y) y1) g1
         let f1 = Proj (Var _q t1_) (Var _z c1_) (Var _x (Var _y g1_)) p1
         p0 === p1
-        unless (f0 == f1) $ tell [Disequality a b]
+        unless (f0 == f1) $ throwError (Disequality a b)
     (Coproduct a0 b0, Coproduct a1 b1) -> do
       a0 === a1
       b0 === b1
@@ -364,28 +364,28 @@ instance MonadInterpret I N P M where
         b1_ <- repoint (Point _y) y1 b1
         let f1 = Match (Var _z t1_) (Var _x a1_) (Var _y b1_) p1
         p0 === p1
-        unless (f0 == f1) $ tell [Disequality a b]
+        unless (f0 == f1) $ throwError (Disequality a b)
     (Sum v0, Sum v1) -> do
       zipWithM_
         ( \(Var i0 p0) (Var i1 p1) -> do
-            unless (i0 == i1) $ tell [Disequality a b]
+            unless (i0 == i1) $ throwError (Disequality a b)
             p0 === p1
         )
         v0
         v1
     (Inj i0 a0, Inj i1 a1) -> do
-      unless (i0 == i1) $ tell [Disequality a b]
+      unless (i0 == i1) $ throwError (Disequality a b)
       fresh \__ -> do
         a0_ <- repoint (Point __) i0 a0
         a1_ <- repoint (Point __) i1 a1
-        unless (a0_ == a1_) $ tell [Disequality a b]
+        unless (a0_ == a1_) $ throwError (Disequality a b)
     (Cases (Var z0 t0) ps0 e0, Cases (Var z1 t1) ps1 e1) -> fresh \__ -> do
       t0_ <- repoint (Point __) z0 t0
       t1_ <- repoint (Point __) z1 t1
       (ps0_, ps1_) <-
         zipWithM
           ( \(Var i0 p0) (Var i1 p1) -> do
-              unless (i0 == i1) $ tell [Disequality a b]
+              unless (i0 == i1) $ throwError (Disequality a b)
               p0 === p1
               pure (Var i0 p0, Var i1 p1)
           )
@@ -395,7 +395,7 @@ instance MonadInterpret I N P M where
       e0 === e1
       let f0 = Cases (Var __ t0_) ps0_ e0
           f1 = Cases (Var __ t1_) ps1_ e1
-      unless (f0 == f1) $ tell [Disequality a b]
+      unless (f0 == f1) $ throwError (Disequality a b)
     (Naturals, Naturals) -> pure ()
     (Zero, Zero) -> pure ()
     (Succ m, Succ n) -> m === n
@@ -410,7 +410,7 @@ instance MonadInterpret I N P M where
         let f1 = Peano (Var _z t1_) c1 (Var _x (Var _y c'1_)) m1
         c0 === c1
         m0 === m1
-        unless (f0 == f1) $ tell [Disequality a b]
+        unless (f0 == f1) $ throwError (Disequality a b)
     (Equality t0 a0 b0, Equality t1 a1 b1) -> do
       t0 === t1
       a0 === a1
@@ -424,7 +424,7 @@ instance MonadInterpret I N P M where
           ( repoint (Point _x) x0
               >=> repoint (Point _y) y0
               >=> repoint (Point _p) p0
-            )
+          )
             t0
         c0_ <- repoint (Point _z) z0 c0
         let f0 = Path ta0 (Var _x (Var _y (Var _p t0_))) (Var _z c0_) a0 b0 e0
@@ -432,15 +432,15 @@ instance MonadInterpret I N P M where
           ( repoint (Point _x) x1
               >=> repoint (Point _y) y1
               >=> repoint (Point _p) p1
-            )
+          )
             t1
         c1_ <- repoint (Point _z) z1 c1
         let f1 = Path ta1 (Var _x (Var _y (Var _p t1_))) (Var _z c1_) a1 b1 e1
         a0 === a1
         b0 === b1
         e0 === e1
-        unless (f0 == f1) $ tell [Disequality a b]
-    _ -> tell [Disequality a b]
+        unless (f0 == f1) $ throwError (Disequality a b)
+    _ -> throwError (Disequality a b)
 
   infer :: P -> M P
   infer this = case this of
@@ -448,7 +448,7 @@ instance MonadInterpret I N P M where
     --
     Point i -> bind (recall i) \case
       Just p -> pure p
-      Nothing -> tell [UnknownIdentifier i]
+      Nothing -> throwError (UnknownIdentifier i)
     --
     Func (Var x ta) tb -> suppose (Var x ta) do
       ua <- universe ta
@@ -462,7 +462,7 @@ instance MonadInterpret I N P M where
       a √ ta
       suppose (Var x ta) do
         infer =<< repoint a x b
-    Apply f _ -> tell [NotAFunction f]
+    Apply f _ -> throwError (NotAFunction f)
     --
     Sigma (Var z ta) tb -> suppose (Var z ta) do
       U <$> sameUniverse ta tb
@@ -479,8 +479,8 @@ instance MonadInterpret I N P M where
         g' <- (repoint a x >=> repoint b y) g
         g' √ tc'
         pure tc'
-    Proj (Var _ Sigma{}) _ _ p -> tell [NotAPair p]
-    Proj (Var _ tp) _ _ _ -> tell [NotASigmaType tp]
+    Proj (Var _ Sigma{}) _ _ p -> throwError (NotAPair p)
+    Proj (Var _ tp) _ _ _ -> throwError (NotASigmaType tp)
     --
     Coproduct ta tb -> do
       ua <- universe ta
@@ -509,7 +509,7 @@ instance MonadInterpret I N P M where
           d' <- repoint b y d
           d' √ tc'
           pure tc'
-      _ -> tell [NotAnInjection e]
+      _ -> throwError (NotAnInjection e)
     --
     Sum vs -> do
       us <- traverse (var $ const universe) vs
@@ -520,18 +520,18 @@ instance MonadInterpret I N P M where
       Just (Func (Var _ ta) tb) -> do
         a √ ta
         pure tb
-      _ -> tell [UnknownIdentifier i]
+      _ -> throwError (UnknownIdentifier i)
     Cases (Var z tc) ps e -> case e of
       Inj i a -> do
         _ <- infer a
         bind (infer e) \case
           Sum vs -> case findPattern i ps of
-            Nothing -> tell [InjectionMismatch e (Sum vs)]
+            Nothing -> throwError (InjectionMismatch e (Sum vs))
             Just _ -> do
               suppose (Var z (Sum vs)) (typ tc)
               repoint e z tc
-          _ -> tell [Crash]
-      _ -> tell [NotAnInjection e]
+          _ -> throwError (Crash)
+      _ -> throwError (NotAnInjection e)
     --
     Naturals -> pure (U 0)
     Zero -> pure Naturals
@@ -550,7 +550,7 @@ instance MonadInterpret I N P M where
             c1' <- (repoint m x >=> repoint ind y) c1
             c1' √ tc'
             pure tc'
-        _ -> tell [NotANatural nat]
+        _ -> throwError (NotANatural nat)
     --
     Equality ta a b -> do
       a √ ta
@@ -567,20 +567,20 @@ instance MonadInterpret I N P M where
         ( repoint (Point z) x
             >=> repoint (Point z) y
             >=> repoint (Refl (Point z)) p
-          )
+        )
           tc
       suppose (Var z ta) (c √ tc')
       pure tc'
     --
-    FunExt _f _g -> tell [Crash]
-    UA _i _ta _tb -> tell [Crash]
+    FunExt _f _g -> throwError (Crash)
+    UA _i _ta _tb -> throwError (Crash)
 
   compute :: P -> M P
   compute = \case
     Apply (Lambda (Var x ta) b) a -> do
       a √ ta
       compute =<< repoint a x b
-    Apply f _ -> tell [NotAFunction f]
+    Apply f _ -> throwError (NotAFunction f)
     --
     Proj (Var _ s@(Sigma (Var _ ta) tb)) (Var z tc) (Var x (Var y g)) (Pair a b) -> do
       suppose (Var z s) (typ tc)
@@ -590,8 +590,8 @@ instance MonadInterpret I N P M where
         g' <- (repoint a x >=> repoint b y) g
         g' √ c'
         compute g'
-    Proj (Var _ Sigma{}) _ _ p -> tell [NotAPair p]
-    Proj (Var _ tp) _ _ _ -> tell [NotASigmaType tp]
+    Proj (Var _ Sigma{}) _ _ p -> throwError (NotAPair p)
+    Proj (Var _ tp) _ _ _ -> throwError (NotASigmaType tp)
     --
     Match (Var z tc) (Var x c) (Var y d) e -> case e of
       InL a -> do
@@ -608,22 +608,22 @@ instance MonadInterpret I N P M where
           d' <- repoint b y d
           d' √ td'
           compute d'
-      _ -> tell [NotAnInjection e]
+      _ -> throwError (NotAnInjection e)
     --
     Cases (Var z tc) cs e -> case e of
       Inj i a -> bind (recall i) \case
         Just (Func (Var x tia) (Sum _)) -> do
           ta <- infer a
-          unless (tia == ta) $ tell [TypeMismatch tia ta]
+          unless (tia == ta) $ throwError (TypeMismatch tia ta)
           case findPattern i cs of
-            Nothing -> tell [UnknownIdentifier i]
+            Nothing -> throwError (UnknownIdentifier i)
             Just c -> suppose (Var x ta) do
               tc' <- repoint (Inj i a) z tc
               c' <- repoint a x c
               c' √ tc'
               compute c'
-        _ -> tell [UnknownIdentifier i]
-      _ -> tell [NotAnInjection e]
+        _ -> throwError (UnknownIdentifier i)
+      _ -> throwError (NotAnInjection e)
     --
     Peano (Var z tc) c0 (Var x (Var y c1)) nat -> do
       suppose (Var z Naturals) (typ tc)
@@ -636,10 +636,10 @@ instance MonadInterpret I N P M where
             c1' <- (repoint m x >=> repoint ind y) c1
             c1' √ tc'
             compute c1'
-        _ -> tell [NotANatural nat]
+        _ -> throwError (NotANatural nat)
     --
     Path ta (Var x (Var y (Var p tc))) (Var z c) a b (Refl a') -> do
-      unless (List.all (a' ==) [a, b]) $ tell [NonidenticalRefl a' a b]
+      unless (List.all (a' ==) [a, b]) $ throwError (NonidenticalRefl a' a b)
       supposeAll
         [ Var x ta
         , Var y ta
@@ -651,12 +651,12 @@ instance MonadInterpret I N P M where
           ( repoint (Point z) x
               >=> repoint (Point z) y
               >=> repoint (Refl (Point z)) p
-            )
+          )
             tc
         c' <- repoint a z c
         c' √ tc'
         compute c'
-    Path _ _ _ _ _ e -> tell [NotAReflection e]
+    Path _ _ _ _ _ e -> throwError (NotAReflection e)
     --
     p -> pure p
 
@@ -670,13 +670,13 @@ universe :: P -> M Natural
 universe point =
   infer point >>= \case
     U u -> pure u
-    t -> tell [NotAType point t]
+    t -> throwError (NotAType point t)
 
 sameUniverse :: P -> P -> M Natural
 sameUniverse p0 p1 = do
   u0 <- universe p0
   u1 <- universe p1
-  unless (u0 == u1) $ tell [UniverseMismatch u0 u1]
+  unless (u0 == u1) $ throwError (UniverseMismatch u0 u1)
   pure u0
 
 findPattern :: I -> [Var I P] -> Maybe P
