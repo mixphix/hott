@@ -137,6 +137,7 @@ instance MonadInterpret I N P M where
   assume :: Var I P -> M ()
   assume (Var i p) = bind (recall i) \case
     Nothing -> do
+      typ p
       modify \n ->
         let g :| gs = n.gamma
          in n{gamma = Map.insert i p g :| gs}
@@ -575,10 +576,9 @@ typ = void . universe
 a √ t = (t ===) =<< infer a
 
 universe :: P -> M Natural
-universe point =
-  infer point >>= \case
-    U u -> pure u
-    t -> throwError (NotAType point t)
+universe point = bind (infer point) \case
+  U u -> pure u
+  t -> throwError (NotAType point t)
 
 sameUniverse :: P -> P -> M Natural
 sameUniverse p0 p1 = do
