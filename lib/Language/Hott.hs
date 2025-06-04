@@ -79,6 +79,11 @@ n0 = N (pure gamma) 0
       , ("Bool", U 0)
       , ("True", Point "Bool")
       , ("False", Point "Bool")
+      , ("Void", U 0)
+      , ("Ordering", U 0)
+      , ("LT", Point "Ordering")
+      , ("EQ", Point "Ordering")
+      , ("GT", Point "Ordering")
       ]
 
 -- | Point
