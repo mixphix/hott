@@ -25,7 +25,6 @@ import Control.Monad.State
 import Data.Bool
 import Data.Either
 import Data.Eq
-import Data.Foldable
 import Data.Function
 import Data.List qualified as List
 import Data.List.NonEmpty (NonEmpty (..))
@@ -101,10 +100,6 @@ data P
   | InR P
   | Match (Var I P) (Var I P) (Var I P) P
   | --
-    Sum [Var I P]
-  | Inj I P
-  | Cases (Var I P) [Var I P] P
-  | --
     Naturals
   | Zero
   | Succ P
@@ -145,9 +140,6 @@ instance MonadInterpret I N P M where
       modify \n ->
         let g :| gs = n.gamma
          in n{gamma = Map.insert i p g :| gs}
-      case p of
-        Sum vs -> for_ vs \(Var i_ p_) -> fresh \__ -> assume (Var i_ $ Func (Var __ p_) (Point i))
-        _ -> pure ()
     Just ip -> throwError (AlreadyBound i ip)
 
   fresh :: (I -> M x) -> M x
@@ -228,23 +220,6 @@ instance MonadInterpret I N P M where
             (Var y <$> rec d)
             (rec e)
     --
-    Sum vs -> Sum <$> traverse recV vs
-    Inj i a
-      | this == i -> fresh \__ -> do
-          rec . Inj __ =<< repoint (Point __) i a
-      | otherwise -> Inj i <$> rec a
-    Cases (Var z tc) ps e
-      | this == z -> fresh \__ -> do
-          tc' <- repoint (Point __) z tc
-          ps' <- traverse recV ps
-          rec . Cases (Var __ tc') ps' =<< repoint (Point __) z e
-      | otherwise ->
-          liftM3
-            Cases
-            (Var z <$> rec tc)
-            (traverse recV ps)
-            (rec e)
-    --
     Naturals -> pure Naturals
     Zero -> pure Zero
     Succ m -> Succ <$> rec m
@@ -295,10 +270,6 @@ instance MonadInterpret I N P M where
     UA i ta tb -> liftM2 (UA i) (rec ta) (rec tb)
    where
     rec = repoint with this
-    recV (Var i p)
-      | this == i =
-          fresh \__ -> Var __ <$> (rec =<< repoint (Point __) i p)
-      | otherwise = Var i <$> rec p
     liftM6 z ma mb mc md me mf = do
       a <- ma
       b <- mb
@@ -370,37 +341,6 @@ instance MonadInterpret I N P M where
         let f1 = Match (Var _z t1_) (Var _x a1_) (Var _y b1_) p1
         p0 === p1
         unless (f0 == f1) $ throwError (Disequality a b)
-    (Sum v0, Sum v1) -> do
-      zipWithM_
-        ( \(Var i0 p0) (Var i1 p1) -> do
-            unless (i0 == i1) $ throwError (Disequality a b)
-            p0 === p1
-        )
-        v0
-        v1
-    (Inj i0 a0, Inj i1 a1) -> do
-      unless (i0 == i1) $ throwError (Disequality a b)
-      fresh \__ -> do
-        a0_ <- repoint (Point __) i0 a0
-        a1_ <- repoint (Point __) i1 a1
-        unless (a0_ == a1_) $ throwError (Disequality a b)
-    (Cases (Var z0 t0) ps0 e0, Cases (Var z1 t1) ps1 e1) -> fresh \__ -> do
-      t0_ <- repoint (Point __) z0 t0
-      t1_ <- repoint (Point __) z1 t1
-      (ps0_, ps1_) <-
-        zipWithM
-          ( \(Var i0 p0) (Var i1 p1) -> do
-              unless (i0 == i1) $ throwError (Disequality a b)
-              p0 === p1
-              pure (Var i0 p0, Var i1 p1)
-          )
-          (List.sort ps0)
-          (List.sort ps1)
-          <&> List.unzip
-      e0 === e1
-      let f0 = Cases (Var __ t0_) ps0_ e0
-          f1 = Cases (Var __ t1_) ps1_ e1
-      unless (f0 == f1) $ throwError (Disequality a b)
     (Naturals, Naturals) -> pure ()
     (Zero, Zero) -> pure ()
     (Succ m, Succ n) -> m === n
@@ -516,28 +456,6 @@ instance MonadInterpret I N P M where
           pure tc'
       _ -> throwError (NotAnInjection e)
     --
-    Sum vs -> do
-      us <- traverse (var $ const universe) vs
-      pure case us of
-        [] -> U 0
-        xs -> U (List.maximum xs)
-    Inj i a -> bind (recall i) \case
-      Just (Func (Var _ ta) tb) -> do
-        a √ ta
-        pure tb
-      _ -> throwError (UnknownIdentifier i)
-    Cases (Var z tc) ps e -> case e of
-      Inj i a -> do
-        _ <- infer a
-        bind (infer e) \case
-          Sum vs -> case findPattern i ps of
-            Nothing -> throwError (InjectionMismatch e (Sum vs))
-            Just _ -> do
-              suppose (Var z (Sum vs)) (typ tc)
-              repoint e z tc
-          _ -> throwError (Crash)
-      _ -> throwError (NotAnInjection e)
-    --
     Naturals -> pure (U 0)
     Zero -> pure Naturals
     Succ m -> m √ Naturals >> pure Naturals
@@ -613,21 +531,6 @@ instance MonadInterpret I N P M where
           d' <- repoint b y d
           d' √ td'
           compute d'
-      _ -> throwError (NotAnInjection e)
-    --
-    Cases (Var z tc) cs e -> case e of
-      Inj i a -> bind (recall i) \case
-        Just (Func (Var x tia) (Sum _)) -> do
-          ta <- infer a
-          unless (tia == ta) $ throwError (TypeMismatch tia ta)
-          case findPattern i cs of
-            Nothing -> throwError (UnknownIdentifier i)
-            Just c -> suppose (Var x ta) do
-              tc' <- repoint (Inj i a) z tc
-              c' <- repoint a x c
-              c' √ tc'
-              compute c'
-        _ -> throwError (UnknownIdentifier i)
       _ -> throwError (NotAnInjection e)
     --
     Peano (Var z tc) c0 (Var x (Var y c1)) nat -> do
