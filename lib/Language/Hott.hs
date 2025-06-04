@@ -122,11 +122,11 @@ data P
 newtype M x = M (Interpret I E N P x)
   deriving newtype (Functor, Applicative, Monad, MonadError E, MonadState N)
 
-runM :: M x -> N -> Either E (x, N)
+runM :: M x -> N -> (Either E x, N)
 runM (M t) = runInterpret t
 
 evalM :: M x -> N -> Either E x
-evalM (M t) = fmap fst . runInterpret t
+evalM (M t) = fst . runInterpret t
 
 -- scoped :: M x -> M x
 -- scoped mx = do
