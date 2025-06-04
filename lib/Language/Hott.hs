@@ -279,6 +279,7 @@ instance MonadInterpret I N P M where
       e <- me
       z a b c d e <$> mf
 
+  (===) :: P -> P -> M ()
   a === b = case (a, b) of
     (U m, U n) -> do
       unless (m == n) $ throwError (UniverseMismatch m n)
