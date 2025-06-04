@@ -119,7 +119,7 @@ data P
   deriving (Eq, Ord, Show, Read)
 
 -- Monad
-newtype M x = M (Interpret I E N P x)
+newtype M x = M (Interpret E N P x)
   deriving newtype (Functor, Applicative, Monad, MonadError E, MonadState N)
 
 runM :: M x -> N -> (Either E x, N)

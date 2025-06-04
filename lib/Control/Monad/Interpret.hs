@@ -60,12 +60,12 @@ supposeAll __ interpret = case __ of
   [] -> interpret
   v : vs -> suppose v (supposeAll vs interpret)
 
-type InterpretT i e n p m x = ExceptT e (StateT n m) x
-type Interpret i e n p x = InterpretT i e n p Identity x
+type InterpretT e n p m x = ExceptT e (StateT n m) x
+type Interpret e n p x = InterpretT e n p Identity x
 
 runInterpretT ::
-  (Monad m) => (InterpretT i e n p m x -> n -> m (Either e x, n))
+  (Monad m) => (InterpretT e n p m x -> n -> m (Either e x, n))
 runInterpretT = runStateT . runExceptT
 
-runInterpret :: Interpret i e n p x -> n -> (Either e x, n)
+runInterpret :: Interpret e n p x -> n -> (Either e x, n)
 runInterpret = (runIdentity .) . runInterpretT
