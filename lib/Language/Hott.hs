@@ -66,11 +66,11 @@ data E
   deriving (Eq, Show, Read)
 
 -- | eNvironment
-data N = N {gamma :: NonEmpty (Map I P), state :: Natural}
+data N = N {gamma :: NonEmpty (Map I P), state :: Natural, definitions :: Map I P}
   deriving (Eq, Ord, Show)
 
 n0 :: N
-n0 = N (pure gamma) 0
+n0 = N (pure gamma) 0 Map.empty
  where
   gamma =
     Map.fromList
@@ -137,21 +137,38 @@ evalM (M t) = fst . runInterpret t
 --   pure x
 
 instance MonadInterpret I N P M where
-  recall :: I -> M (Maybe P)
-  recall i = gets (asum . fmap (Map.lookup i) . gamma)
+  typeof :: I -> M (Maybe P)
+  typeof i = gets \n -> asum (Map.lookup i <$> n.gamma)
   assume :: Var I P -> M ()
-  assume (Var i p) = bind (recall i) \case
+  assume (Var i p) = bind (typeof i) \case
     Nothing -> do
       typ p
       modify \n ->
         let g :| gs = n.gamma
          in n{gamma = Map.insert i p g :| gs}
     Just ip -> throwError (AlreadyBound i ip)
+  define :: Var I P -> M ()
+  define (Var i p) = bind (typeof i) \case
+    Nothing -> do
+      ip <- infer p
+      case ip of
+        U _ -> do
+          assume (Var i ip)
+          modify \n ->
+            n{definitions = Map.insert i p n.definitions}
+        t -> do
+          typ t
+          assume (Var i ip)
+          modify \n ->
+            n{definitions = Map.insert i p n.definitions}
+    Just ip -> throwError (AlreadyBound i ip)
+  recall :: I -> M (Maybe P)
+  recall i = gets \n -> Map.lookup i n.definitions
 
   fresh :: (I -> M x) -> M x
   fresh rec = do
     n <- get
-    put (N n.gamma (succ n.state))
+    put (N n.gamma (succ n.state) n.definitions)
     rec ("_" <> fromString (show n.state))
 
   repoint :: P -> I -> (P -> M P)
@@ -398,7 +415,7 @@ instance MonadInterpret I N P M where
   infer this = case this of
     U u -> pure (U (succ u))
     --
-    Point i -> bind (recall i) \case
+    Point i -> bind (typeof i) \case
       Just p -> pure p
       Nothing -> throwError (UnknownIdentifier i)
     --
@@ -507,10 +524,15 @@ instance MonadInterpret I N P M where
 
   compute :: P -> M P
   compute = \case
+    Point x -> bind (recall x) \case
+      Nothing -> pure (Point x)
+      Just p -> compute p
     Apply (Lambda (Var x ta) b) a -> do
       a √ ta
       compute =<< repoint a x b
-    Apply f _ -> throwError (NotAFunction f)
+    Apply f a -> do
+      p <- compute f
+      compute (Apply p a)
     --
     Proj (Var _ s@(Sigma (Var _ ta) tb)) (Var z tc) (Var x (Var y g)) (Pair a b) -> do
       suppose (Var z s) (typ tc)
@@ -520,8 +542,12 @@ instance MonadInterpret I N P M where
         g' <- (repoint a x >=> repoint b y) g
         g' √ c'
         compute g'
-    Proj (Var _ Sigma{}) _ _ p -> throwError (NotAPair p)
-    Proj (Var _ tp) _ _ _ -> throwError (NotASigmaType tp)
+    Proj s@(Var _ Sigma{}) z xy p -> bind (compute p) \case
+      Pair a b -> compute (Proj s z xy (Pair a b))
+      x -> throwError (NotAPair x)
+    Proj (Var x tp) z xy p -> bind (compute tp) \case
+      Sigma v t -> compute $ Proj (Var x (Sigma v t)) z xy p
+      t -> throwError (NotASigmaType t)
     --
     Match (Var z tc) (Var x c) (Var y d) e -> case e of
       InL a -> do
@@ -538,7 +564,10 @@ instance MonadInterpret I N P M where
           d' <- repoint b y d
           d' √ td'
           compute d'
-      _ -> throwError (NotAnInjection e)
+      e' -> bind (compute e') \case
+        InL a -> compute (Match (Var z tc) (Var x c) (Var y d) (InL a))
+        InR b -> compute (Match (Var z tc) (Var x c) (Var y d) (InR b))
+        p -> throwError (NotAnInjection p)
     --
     Peano (Var z tc) c0 (Var x (Var y c1)) nat -> do
       suppose (Var z Naturals) (typ tc)

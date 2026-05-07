@@ -2,8 +2,10 @@ module Control.Monad.Interpret
   ( Var (Var)
   , var
   , MonadInterpret
-    ( recall
-    , assume
+    ( assume
+    , typeof
+    , define
+    , recall
     , fresh
     , repoint
     , (===)
@@ -39,8 +41,10 @@ var :: (i -> p -> x) -> (Var i p -> x)
 var f (Var i p) = f i p
 
 class (MonadState n m) => MonadInterpret i n p m | m -> i n p where
-  recall :: i -> m (Maybe p)
   assume :: Var i p -> m ()
+  typeof :: i -> m (Maybe p)
+  define :: Var i p -> m ()
+  recall :: i -> m (Maybe p)
 
   fresh :: (i -> m x) -> m x
   repoint :: p -> i -> (p -> m p)
