@@ -7,6 +7,7 @@ module Language.Hott
   , runM
   , evalM
   , n0
+  , n1
   , typ
   , universe
   , sameUniverse
@@ -127,6 +128,31 @@ runM (M t) = runInterpret t
 
 evalM :: M x -> N -> Either E x
 evalM (M t) = fst . runInterpret t
+
+n1 :: N
+n1 = snd $ flip runM n0 do
+  define
+    ( Var
+        "id"
+        ( Lambda
+            (Var "A" (U 0))
+            (Lambda (Var "x" (Point "A")) (Point "x"))
+        )
+    )
+  define
+    ( Var
+        "const"
+        ( Lambda
+            (Var "A" (U 0))
+            ( Lambda
+                (Var "B" (U 0))
+                ( Lambda
+                    (Var "x" (Point "A"))
+                    (Lambda (Var "y" (Point "B")) (Point "x"))
+                )
+            )
+        )
+    )
 
 -- scoped :: M x -> M x
 -- scoped mx = do
@@ -415,9 +441,11 @@ instance MonadInterpret I N P M where
   infer this = case this of
     U u -> pure (U (succ u))
     --
-    Point i -> bind (typeof i) \case
-      Just p -> pure p
-      Nothing -> throwError (UnknownIdentifier i)
+    Point i -> bind (recall i) \case
+      Just p -> infer p
+      Nothing -> bind (typeof i) \case
+        Just p -> pure p
+        Nothing -> throwError (UnknownIdentifier i)
     --
     Func (Var x ta) tb -> suppose (Var x ta) do
       ua <- universe ta
