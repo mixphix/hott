@@ -482,7 +482,7 @@ instance MonadInterpret I N P M where
     Coproduct ta tb -> do
       ua <- universe ta
       ub <- universe tb
-      pure (U $ max ua ub)
+      pure $ U (max ua ub)
     InL a -> do
       ta <- infer a
       fresh $ pure . Coproduct ta . Point

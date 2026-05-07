@@ -41,18 +41,30 @@ var :: (i -> p -> x) -> (Var i p -> x)
 var f (Var i p) = f i p
 
 class (MonadState n m) => MonadInterpret i n p m | m -> i n p where
+  -- | Assume that the type is inhabited by the identifier.
   assume :: Var i p -> m ()
+  -- | Look up the type of an identifier, if it exists.
   typeof :: i -> m (Maybe p)
+  -- | Give the definition of an identifier.
   define :: Var i p -> m ()
+  -- | Look up the definition of an identifier, if it exists.
   recall :: i -> m (Maybe p)
 
+  -- | Generate and use a fresh identifier.
   fresh :: (i -> m x) -> m x
+  -- | Alpha-conversion.
   repoint :: p -> i -> (p -> m p)
+  -- | Equivalence up to alpha-conversion.
   (===) :: p -> p -> m ()
 
+  -- | Find the type of a point.
   infer :: p -> m p
+  -- | Calculate the beta-reduction.
   compute :: p -> m p
 
+-- |
+-- Suppose for the sake of the argument that the type is inhabited by the identifier.
+-- Then, reset the original context.
 suppose :: (MonadInterpret i n p m) => Var i p -> m x -> m x
 suppose __ interpret = do
   n <- get
