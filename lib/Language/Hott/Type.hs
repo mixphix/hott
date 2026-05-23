@@ -1,4 +1,4 @@
-module Language.Hott
+module Language.Hott.Type
   ( I (..)
   , E (..)
   , N (..)
@@ -438,7 +438,7 @@ instance MonadInterpret I N P M where
     _ -> throwError (Disequality a b)
 
   infer :: P -> M P
-  infer this = case this of
+  infer = \case
     U u -> pure (U (succ u))
     --
     Point i -> bind (recall i) \case

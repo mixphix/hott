@@ -25,6 +25,7 @@ common settings
 
   build-depends:
     , base
+    , bolt
     , containers
     , control-block
     , mtl
@@ -38,4 +39,5 @@ library
   exposed-modules:
     Control.Monad.Interpret
 
-    Language.Hott
+    Language.Hott.Lex
+    Language.Hott.Type
