@@ -35,15 +35,12 @@ import Data.Maybe
 import Data.Ord
 import Data.Semigroup (Semigroup ((<>)))
 import Data.String
-import Data.Text (Text)
 import Data.Tuple
 import GHC.Enum
 import GHC.Show
+import Language.Hott.Lex (I (I))
 import Numeric.Natural (Natural)
 import Text.Read (Read)
-
--- | Identifier
-newtype I = I Text deriving newtype (IsString, Eq, Ord, Semigroup, Show, Read)
 
 -- | Error
 data E

@@ -40,4 +40,6 @@ library
     Control.Monad.Interpret
 
     Language.Hott.Lex
+    Language.Hott.Parse
+    Language.Hott.Source
     Language.Hott.Type
